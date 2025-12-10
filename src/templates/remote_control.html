@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Magic Lid Remote</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #111827;
+            --text: #e5e7eb;
+            --accent: #10b981;
+            --accent-off: #ef4444;
+            --accent-toggle: #f59e0b;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Inter", system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            max-width: 480px;
+            width: 100%;
+            padding: 24px 16px 48px;
+        }
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        h1 {
+            margin: 0 0 8px 0;
+            font-size: 1.6rem;
+            letter-spacing: 0.5px;
+        }
+        p {
+            margin: 4px 0;
+            color: #cbd5e1;
+        }
+        .card {
+            background: var(--panel);
+            border-radius: 18px;
+            padding: 18px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+        }
+        .buttons {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        button {
+            width: 100%;
+            padding: 16px 12px;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #0b1220;
+            cursor: pointer;
+            transition: transform 0.08s ease, box-shadow 0.12s ease;
+        }
+        button:active {
+            transform: translateY(1px);
+            box-shadow: none;
+        }
+        .on { background: var(--accent); box-shadow: 0 8px 16px rgba(16,185,129,0.35); }
+        .off { background: var(--accent-off); box-shadow: 0 8px 16px rgba(239,68,68,0.35); }
+        .toggle { background: var(--accent-toggle); box-shadow: 0 8px 16px rgba(245,158,11,0.35); }
+        .status {
+            display: grid;
+            gap: 6px;
+            font-size: 1rem;
+        }
+        .status label {
+            color: #9ca3af;
+            font-size: 0.95rem;
+        }
+        .state {
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+        .pill {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+        .pill.on { background: rgba(16,185,129,0.15); color: #bbf7d0; }
+        .pill.off { background: rgba(239,68,68,0.2); color: #fecdd3; }
+        .pill.unknown { background: rgba(255,255,255,0.08); color: #e5e7eb; }
+        footer {
+            margin-top: 12px;
+            text-align: center;
+            color: #94a3b8;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Magic Lid Web Remote</h1>
+            <p>Tap a button to update the remote LID flag. Works best on your trusted home network.</p>
+        </header>
+        <div class="card">
+            <div class="buttons">
+                <form method="post" action="{{ url_for('lid_on') }}">
+                    <button class="on" type="submit">Turn Remote LID ON</button>
+                </form>
+                <form method="post" action="{{ url_for('lid_off') }}">
+                    <button class="off" type="submit">Turn Remote LID OFF</button>
+                </form>
+                <form method="post" action="{{ url_for('lid_toggle') }}">
+                    <button class="toggle" type="submit">Toggle Remote LID</button>
+                </form>
+            </div>
+            <div class="status">
+                <div>
+                    <label>Remote LID Flag</label>
+                    {% if remote_on %}
+                        <span class="pill on">ON</span>
+                    {% else %}
+                        <span class="pill off">OFF</span>
+                    {% endif %}
+                </div>
+                <div>
+                    <label>Lid Switch</label>
+                    {% if lid_closed is none %}
+                        <span class="pill unknown">Unknown</span>
+                    {% elif lid_closed %}
+                        <span class="pill on">CLOSED</span>
+                    {% else %}
+                        <span class="pill off">OPEN</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        <footer>
+            <p>Controller service keeps LEDs in sync; this page just updates the stored flag.</p>
+        </footer>
+    </div>
+</body>
+</html>

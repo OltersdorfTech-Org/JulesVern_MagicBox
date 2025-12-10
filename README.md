@@ -69,6 +69,59 @@ Interaction summary:
 - Lid closed **and** remote state ON → LID LED ON
 - Lid open → LID LED OFF regardless of remote state
 
+SSH commands remain supported for power users (or RaspController custom commands), but the web UI below is the simplest option for day-to-day control.
+
+## Web UI (Flask) — big buttons on a web page
+
+Intent: provide a dead-simple, mobile-friendly way to flip the remote LID LED flag from any browser on your trusted home network. The web UI reuses the same stored flag that the background GPIO controller watches, so hardware behavior stays unchanged.
+
+### Dependencies
+
+- Install pip if needed: `sudo apt install python3-pip`
+- Install Flask (adds to the existing gpiozero dependency):
+
+```sh
+pip3 install -r requirements.txt
+# or
+pip3 install flask
+```
+
+### Web UI overview
+
+- Once running, open `http://<pi-ip>:8080`.
+- You will see three large buttons: **ON**, **OFF**, and **TOGGLE** for the remote LID flag.
+- Status text shows the stored remote flag and (when hardware is reachable) whether the lid switch is currently OPEN or CLOSED.
+- Intended for local, trusted networks only; no authentication is provided.
+
+### How to run the web UI manually
+
+```sh
+cd /home/pi/JulesVern_MagicBox
+python3 src/web_server.py  # defaults to port 8080
+```
+
+Then browse to `http://<pi-ip>:8080`. Use `hostname -I` on the Pi to print its LAN IP address.
+
+### Optional systemd setup for the web UI
+
+Keep the original GPIO controller service enabled. Add a separate unit for the Flask server so both can run together:
+
+```sh
+sudo cp systemd/magic_lid_web.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable magic_lid_web.service
+sudo systemctl start magic_lid_web.service
+sudo systemctl status magic_lid_web.service
+```
+
+After that, powering on the Pi and visiting `http://<pi-ip>:8080` is enough—tap a button and the background controller will pick up the new flag immediately.
+
+### Why this design & assumptions
+
+- Reuses the existing `state/lid_remote_state.json` file, so the GPIO controller logic stays untouched.
+- The Flask server only adjusts the stored flag and reads the lid switch if possible; it does not drive LEDs directly.
+- Designed for a trusted home LAN (no authentication or TLS); if you need wider exposure, place it behind your own secure reverse proxy.
+
 ## Configuration
 
 All tunables live in `src/config.py`:
