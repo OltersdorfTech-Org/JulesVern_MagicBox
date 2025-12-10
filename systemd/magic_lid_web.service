@@ -1,0 +1,16 @@
+[Unit]
+Description=Magic Lid web UI (Flask)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/JulesVern_MagicBox
+ExecStart=/usr/bin/python3 /home/pi/JulesVern_MagicBox/src/web_server.py --port 8080
+Restart=on-failure
+StandardOutput=journal
+StandardError=journal
+User=pi
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
