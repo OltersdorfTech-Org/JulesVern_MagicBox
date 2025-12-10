@@ -1,0 +1,15 @@
+[Unit]
+Description=Magic Lid GPIO controller
+After=multi-user.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/JulesVern_MagicBox
+ExecStart=/usr/bin/python3 /home/pi/JulesVern_MagicBox/src/main.py
+Restart=on-failure
+StandardOutput=journal
+StandardError=journal
+User=pi
+
+[Install]
+WantedBy=multi-user.target
