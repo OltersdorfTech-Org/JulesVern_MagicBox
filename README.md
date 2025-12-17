@@ -23,13 +23,38 @@ A headless Raspberry Pi project that monitors three switches (lid + two keys) an
 - All pin numbers in the table are physical header pins with BCM mappings listed. If your wiring differs, edit `src/config.py` accordingly.
 - Double-check your mapping with an official Raspberry Pi pinout before applying power.
 
+```
+Raspberry Pi 40-pin header (physical numbers)
+
+ 3V3  (1) (2)  5V
+ GPIO2 (3) (4)  5V
+ GPIO3 (5) (6) GND
+ GPIO4 (7) (8) GPIO14
+  GND  (9) (10) GPIO15
+ GPIO17(11) (12) GPIO18
+ GPIO27(13) (14) GND
+ GPIO22(15) (16) GPIO23
+ 3V3  (17) (18) GPIO24
+ GPIO10(19) (20) GND
+ GPIO9 (21) (22) GPIO25
+ GPIO11(23) (24) GPIO8
+  GND  (25) (26) GPIO7
+ GPIO0 (27) (28) GPIO1
+ GPIO5 (29) (30) GND
+ GPIO6 (31) (32) GPIO12
+ GPIO13(33) (34) GND
+ GPIO19(35) (36) GPIO16
+ GPIO26(37) (38) GPIO20
+  GND  (39) (40) GPIO21
+```
+
 ## Software Setup
 
 Tested for Raspberry Pi OS (Bullseye/Bookworm) with Python 3.
 
 1. Update packages: `sudo apt update && sudo apt upgrade -y`
 2. Install GPIO dependencies: `sudo apt install -y python3-gpiozero python3-rpi.gpio`
-3. Clone/download this repository: `git clone https://github.com/<your-user>/JulesVern_MagicBox.git && cd JulesVern_MagicBox`
+3. If working on Windows 10/11 without WSL, download the repo ZIP from GitHub, extract it, and copy the **JulesVern_MagicBox** folder to the SD card’s `boot`/`firmware` partition using File Explorer (see "Windows-only: copy the repo without Git" below). No Git is required on the Pi.
 4. (Optional) Create a venv, then install pip deps: `pip install -r requirements.txt`
 5. **Edit pin mappings and rules:** open `src/config.py` and set BCM pin numbers for all signals (Lid Switch, Key 2 Switch, Key 2 LED, etc.).
 6. Run manually: `python3 src/main.py`
@@ -89,8 +114,11 @@ pip3 install flask
 ### Web UI overview
 
 - Once running, open `http://<pi-ip>:8080`.
-- You will see three large buttons: **ON**, **OFF**, and **TOGGLE** for the remote LID flag.
-- Status text shows the stored remote flag and (when hardware is reachable) whether the lid switch is currently OPEN or CLOSED.
+- You will see two toggle buttons with indicators beside them:
+  - **LID LED Toggle** — flips the stored remote LID flag.
+  - **magic flicker toggle** — flips the Magic Flag controlling the Magic LED flicker permission.
+- A prominent **Safety** control appears above the toggles. Safety defaults to **OFF** on boot; when it is off, the toggles are disabled and the server rejects toggle actions. Enable Safety to allow any GPIO activity.
+- Status text shows the lid switch state (OPEN/CLOSED/Unknown).
 - Intended for local, trusted networks only; no authentication is provided.
 
 ### How to run the web UI manually
@@ -101,6 +129,19 @@ python3 src/web_server.py  # defaults to port 8080
 ```
 
 Then browse to `http://<pi-ip>:8080`. Use `hostname -I` on the Pi to print its LAN IP address.
+
+### GPIO table from the web UI
+
+- The bottom of the page includes a table to edit the physical pin numbers for:
+  - `lid_switch_pin`
+  - `lid_led_pin`
+  - `magic_flicker_led_pin`
+  - `Key1LED PIN`
+  - `Key2LED PIN`
+  - `Key1switch PIN`
+  - `Key2switch PIN`
+- Inputs must be integers mapped to real GPIO header pins; power/ground pins are rejected. Submitted values rewrite the dataclass entries in `src/config.py`.
+- The Raspberry Pi physical pin diagram (above) is rendered alongside the form to help pick the right header numbers.
 
 ### Optional systemd setup for the web UI
 
@@ -118,9 +159,33 @@ After that, powering on the Pi and visiting `http://<pi-ip>:8080` is enough—ta
 
 ### Why this design & assumptions
 
-- Reuses the existing `state/lid_remote_state.json` file, so the GPIO controller logic stays untouched.
-- The Flask server only adjusts the stored flag and reads the lid switch if possible; it does not drive LEDs directly.
+- Reuses the existing `state/lid_remote_state.json` file, adding Magic and Safety flags alongside the remote LID flag.
+- The Flask server only adjusts stored flags, enforces Safety in the routes, and reads the lid switch if possible; it does not drive LEDs directly.
 - Designed for a trusted home LAN (no authentication or TLS); if you need wider exposure, place it behind your own secure reverse proxy.
+
+## Windows-only: copy the repo without Git
+
+If you do not want to install Git on Windows, you can prepare the SD card entirely from File Explorer:
+
+1. Download the repository ZIP from GitHub on your Windows PC.
+2. Insert the Raspberry Pi SD card. Windows should mount the FAT `boot`/`firmware` partition automatically. If it does not, open **Disk Management**, right-click the small FAT partition for the SD card, and assign it a drive letter so it appears in File Explorer.
+3. Extract the ZIP and copy the `JulesVern_MagicBox` folder into the root of the `boot`/`firmware` drive.
+4. Safely eject the card and boot the Pi.
+
+### Move the copied folder on the Pi and run it
+
+After the Pi boots (with the card prepared above), move the project into your home directory and run setup from there:
+
+```sh
+cd /home/pi
+mkdir -p ~/src
+mv /boot/firmware/JulesVern_MagicBox ~/src/
+cd ~/src/JulesVern_MagicBox
+python3 -m venv .venv  # optional
+source .venv/bin/activate || true
+pip install -r requirements.txt
+python3 src/main.py
+```
 
 ## Configuration
 

@@ -1,15 +1,18 @@
-"""Lightweight Flask web server for controlling the remote LID LED flag.
+"""Lightweight Flask web server for controlling remote flags and safety.
 
 The web interface mirrors the existing CLI options, providing large buttons
 that toggle the persisted remote LID state while the background GPIO service
-keeps hardware in sync. Status text is kept simple and is intended for use on
+keeps hardware in sync. It also exposes Magic flicker and Safety toggles plus
+a GPIO pin editor. Status text is kept simple and is intended for use on
 trusted home networks.
 """
 import argparse
+import importlib
+import re
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
-from flask import Flask, redirect, render_template, url_for
+from flask import Flask, redirect, render_template, request, url_for
 from gpiozero import Button
 
 import config
@@ -22,6 +25,84 @@ TEMPLATE_DIR = BASE_DIR / "templates"
 
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
 state_store = RemoteStateStore(config.REMOTE_STATE_FILE)
+
+PHYSICAL_TO_BCM: Dict[int, Optional[int]] = {
+    1: None,
+    2: None,
+    3: 2,
+    4: None,
+    5: 3,
+    6: None,
+    7: 4,
+    8: 14,
+    9: None,
+    10: 15,
+    11: 17,
+    12: 18,
+    13: 27,
+    14: None,
+    15: 22,
+    16: 23,
+    17: None,
+    18: 24,
+    19: 10,
+    20: None,
+    21: 9,
+    22: 25,
+    23: 11,
+    24: 8,
+    25: None,
+    26: 7,
+    27: 0,
+    28: 1,
+    29: 5,
+    30: None,
+    31: 6,
+    32: 12,
+    33: 13,
+    34: None,
+    35: 19,
+    36: 16,
+    37: 26,
+    38: 20,
+    39: None,
+    40: 21,
+}
+
+PIN_FIELD_MAP = {
+    "lid_switch_pin": "LID_SWITCH",
+    "lid_led_pin": "LID_LED",
+    "magic_flicker_led_pin": "MAGIC_LED",
+    "key1_led_pin": "KEY1_LED",
+    "key2_led_pin": "KEY2_LED",
+    "key1_switch_pin": "KEY1_SWITCH",
+    "key2_switch_pin": "KEY2_SWITCH",
+}
+
+PIN_DIAGRAM = """
+Raspberry Pi 40-pin header (physical numbers)
+
+ 3V3  (1) (2)  5V
+ GPIO2 (3) (4)  5V
+ GPIO3 (5) (6) GND
+ GPIO4 (7) (8) GPIO14
+  GND  (9) (10) GPIO15
+ GPIO17(11) (12) GPIO18
+ GPIO27(13) (14) GND
+ GPIO22(15) (16) GPIO23
+ 3V3  (17) (18) GPIO24
+ GPIO10(19) (20) GND
+ GPIO9 (21) (22) GPIO25
+ GPIO11(23) (24) GPIO8
+  GND  (25) (26) GPIO7
+ GPIO0 (27) (28) GPIO1
+ GPIO5 (29) (30) GND
+ GPIO6 (31) (32) GPIO12
+ GPIO13(33) (34) GND
+ GPIO19(35) (36) GPIO16
+ GPIO26(37) (38) GPIO20
+  GND  (39) (40) GPIO21
+"""
 
 
 def read_lid_switch_state() -> Optional[bool]:
@@ -48,36 +129,158 @@ def read_lid_switch_state() -> Optional[bool]:
 def build_status_payload() -> dict:
     """Compose status details for the template."""
 
-    remote_on = state_store.read()
+    state = state_store.read_all()
+    remote_on = state["remote_lid_on"]
+    magic_on = state["magic_flag_on"]
+    safety_on = state["safety_enabled"]
     lid_closed = read_lid_switch_state()
     return {
         "remote_on": remote_on,
+        "magic_on": magic_on,
+        "safety_on": safety_on,
         "lid_closed": lid_closed,
+        "pins": {
+            "lid_switch_pin": config.LID_SWITCH.physical_pin,
+            "lid_led_pin": config.LID_LED.physical_pin,
+            "magic_flicker_led_pin": config.MAGIC_LED.physical_pin,
+            "key1_led_pin": config.KEY1_LED.physical_pin,
+            "key2_led_pin": config.KEY2_LED.physical_pin,
+            "key1_switch_pin": config.KEY1_SWITCH.physical_pin,
+            "key2_switch_pin": config.KEY2_SWITCH.physical_pin,
+        },
     }
+
+
+def _safety_redirect(action: str):
+    if not state_store.read_safety():
+        return redirect(
+            url_for(
+                "index",
+                alert=f"Safety is disabled; cannot {action}. Enable safety to use controls.",
+            )
+        )
+    return None
+
+
+def update_config_file(pin_updates: Dict[str, int]) -> None:
+    config_path = Path(config.__file__).resolve()
+    content = config_path.read_text(encoding="utf-8")
+
+    for field, physical_pin in pin_updates.items():
+        bcm_pin = PHYSICAL_TO_BCM.get(physical_pin)
+        block = PIN_FIELD_MAP[field]
+        pattern = re.compile(
+            rf"({block}\s*=\s*SignalPin\(\s*name=\"{block}\",\s*bcm_pin=)([^,]+)(,.*?physical_pin=)([^,]+)(,)",
+            re.DOTALL,
+        )
+
+        def _replace(match: re.Match[str]) -> str:
+            return (
+                f"{match.group(1)}{bcm_pin}{match.group(3)}{physical_pin}{match.group(5)}"
+            )
+
+        content, replaced = pattern.subn(_replace, content, count=1)
+        if replaced == 0:
+            raise ValueError(f"Could not update pin block for {block}")
+
+    config_path.write_text(content, encoding="utf-8")
+    importlib.reload(config)
 
 
 @app.route("/")
 def index():
     status = build_status_payload()
-    return render_template("remote_control.html", **status)
+    alert = request.args.get("alert")
+    notice = request.args.get("notice")
+    return render_template(
+        "remote_control.html",
+        pin_diagram=PIN_DIAGRAM,
+        alert=alert,
+        notice=notice,
+        **status,
+    )
 
 
 @app.post("/lid/on")
 def lid_on():
+    guard = _safety_redirect("turn the LID LED on")
+    if guard:
+        return guard
     state_store.write(True)
-    return redirect(url_for("index"))
+    return redirect(url_for("index", notice="LID flag set to ON"))
 
 
 @app.post("/lid/off")
 def lid_off():
+    guard = _safety_redirect("turn the LID LED off")
+    if guard:
+        return guard
     state_store.write(False)
-    return redirect(url_for("index"))
+    return redirect(url_for("index", notice="LID flag set to OFF"))
 
 
 @app.post("/lid/toggle")
 def lid_toggle():
-    state_store.toggle()
-    return redirect(url_for("index"))
+    guard = _safety_redirect("toggle the LID LED flag")
+    if guard:
+        return guard
+    new_state = state_store.toggle()
+    return redirect(
+        url_for("index", notice=f"LID flag toggled to {'ON' if new_state else 'OFF'}")
+    )
+
+
+@app.post("/magic/toggle")
+def magic_toggle():
+    guard = _safety_redirect("toggle magic flicker")
+    if guard:
+        return guard
+    new_state = state_store.toggle_magic()
+    return redirect(
+        url_for("index", notice=f"Magic flag toggled to {'ON' if new_state else 'OFF'}")
+    )
+
+
+@app.post("/safety/toggle")
+def safety_toggle():
+    new_state = state_store.toggle_safety()
+    if not new_state:
+        notice = "Safety disabled: outputs will remain off and controls are locked."
+    else:
+        notice = "Safety enabled: controls are now active."
+    return redirect(url_for("index", notice=notice))
+
+
+@app.post("/pins/update")
+def pins_update():
+    errors = []
+    updates: Dict[str, int] = {}
+    for field in PIN_FIELD_MAP:
+        raw_value = request.form.get(field, "").strip()
+        if not raw_value:
+            errors.append(f"{field.replace('_', ' ').title()} is required")
+            continue
+        if not raw_value.isdigit():
+            errors.append(f"{raw_value} is not a valid integer for {field}")
+            continue
+        physical_pin = int(raw_value)
+        bcm_pin = PHYSICAL_TO_BCM.get(physical_pin)
+        if bcm_pin is None:
+            errors.append(
+                f"Physical pin {physical_pin} is not a usable GPIO. Use a numbered GPIO pin."
+            )
+            continue
+        updates[field] = physical_pin
+
+    if errors:
+        return redirect(url_for("index", alert="; ".join(errors)))
+
+    try:
+        update_config_file(updates)
+    except Exception as exc:  # noqa: BLE001
+        return redirect(url_for("index", alert=f"Failed to update config: {exc}"))
+
+    return redirect(url_for("index", notice="GPIO pins updated in config.py"))
 
 
 def parse_args() -> argparse.Namespace:
