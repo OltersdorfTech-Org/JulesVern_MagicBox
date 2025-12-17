@@ -5,8 +5,10 @@ or be called with CLI flags to adjust the remote LID LED state.
 """
 import argparse
 import json
+import os
 import random
 import signal
+import tempfile
 import time
 from pathlib import Path
 from threading import Event, Thread
@@ -32,8 +34,14 @@ class RemoteStateStore:
 
     def _write_state(self, state: dict) -> None:
         merged = {**self.DEFAULT_STATE, **state}
-        with self.path.open("w", encoding="utf-8") as handle:
+        with tempfile.NamedTemporaryFile(
+            "w", dir=self.path.parent, encoding="utf-8", delete=False
+        ) as handle:
             json.dump(merged, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+            tmp_name = handle.name
+        Path(tmp_name).replace(self.path)
 
     def read_all(self) -> dict:
         if not self.path.exists():
@@ -98,6 +106,10 @@ class MagicFlickerWorker:
     def start(self) -> None:
         if not self.thread.is_alive():
             self.thread.start()
+
+    def join(self, timeout: Optional[float] = None) -> None:
+        if self.thread.is_alive():
+            self.thread.join(timeout)
 
     def update(self, enabled: bool) -> None:
         self.enabled = enabled
@@ -216,6 +228,12 @@ class ServiceRunner:
         print("Magic Lid service starting...")
         self._setup_signal_handlers()
         self._attach_switch_handlers()
+        print(
+            "Startup state — "
+            f"Safety: {'ENABLED' if self.safety_enabled else 'DISABLED'}, "
+            f"Remote LID: {'ON' if self.remote_lid_on else 'OFF'}, "
+            f"Magic: {'ON' if self.magic_enabled else 'OFF'}"
+        )
         update_outputs(
             self.hardware, self.remote_lid_on, self.magic_enabled, self.safety_enabled
         )
@@ -283,6 +301,10 @@ class ServiceRunner:
         self.stop_event.set()
 
     def _cleanup(self) -> None:
+        self.stop_event.set()
+        flicker: MagicFlickerWorker = self.hardware["flicker"]
+        flicker.update(False)
+        flicker.join(timeout=1.0)
         self.hardware["lid_led"].off()
         self.hardware["key1_led"].off()
         self.hardware["key2_led"].off()

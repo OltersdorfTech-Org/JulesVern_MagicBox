@@ -7,10 +7,10 @@ a GPIO pin editor. Status text is kept simple and is intended for use on
 trusted home networks.
 """
 import argparse
+import ast
 import importlib
-import re
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from flask import Flask, redirect, render_template, request, url_for
 from gpiozero import Button
@@ -25,6 +25,9 @@ TEMPLATE_DIR = BASE_DIR / "templates"
 
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
 state_store = RemoteStateStore(config.REMOTE_STATE_FILE)
+
+_lid_button: Optional[Button] = None
+_lid_button_failed: bool = False
 
 PHYSICAL_TO_BCM: Dict[int, Optional[int]] = {
     1: None,
@@ -112,17 +115,22 @@ def read_lid_switch_state() -> Optional[bool]:
     None if the state cannot be determined (e.g., missing hardware).
     """
 
+    global _lid_button_failed, _lid_button
+
+    if _lid_button_failed:
+        return None
+
     try:
-        lid_button = Button(
-            config.LID_SWITCH.bcm_pin,
-            pull_up=config.SWITCH_PULL_UP,
-            bounce_time=config.SWITCH_DEBOUNCE_S,
-        )
-        is_pressed = lid_button.is_pressed
-        lid_button.close()
-        return is_pressed
+        if _lid_button is None:
+            _lid_button = Button(
+                config.LID_SWITCH.bcm_pin,
+                pull_up=config.SWITCH_PULL_UP,
+                bounce_time=config.SWITCH_DEBOUNCE_S,
+            )
+        return _lid_button.is_pressed
     except Exception as exc:  # noqa: BLE001 - broad catch keeps UI alive on hardware errors
         print(f"Warning: unable to read lid switch state ({exc})")
+        _lid_button_failed = True
         return None
 
 
@@ -165,26 +173,61 @@ def _safety_redirect(action: str):
 def update_config_file(pin_updates: Dict[str, int]) -> None:
     config_path = Path(config.__file__).resolve()
     content = config_path.read_text(encoding="utf-8")
+    tree = ast.parse(content)
+    line_offsets = _line_offsets(content)
+    replacements = []
 
     for field, physical_pin in pin_updates.items():
         bcm_pin = PHYSICAL_TO_BCM.get(physical_pin)
         block = PIN_FIELD_MAP[field]
-        pattern = re.compile(
-            rf"({block}\s*=\s*SignalPin\(\s*name=\"{block}\",\s*bcm_pin=)([^,]+)(,.*?physical_pin=)([^,]+)(,)",
-            re.DOTALL,
-        )
+        assignment = _find_assignment(tree, block)
+        call = _extract_signalpin_call(assignment, block)
 
-        def _replace(match: re.Match[str]) -> str:
-            return (
-                f"{match.group(1)}{bcm_pin}{match.group(3)}{physical_pin}{match.group(5)}"
-            )
+        for keyword, value in {"bcm_pin": bcm_pin, "physical_pin": physical_pin}.items():
+            span = _keyword_span(call, keyword, line_offsets)
+            replacements.append((span, str(value)))
 
-        content, replaced = pattern.subn(_replace, content, count=1)
-        if replaced == 0:
-            raise ValueError(f"Could not update pin block for {block}")
+    for (start, end), replacement in sorted(replacements, key=lambda item: item[0][0], reverse=True):
+        content = content[:start] + replacement + content[end:]
 
     config_path.write_text(content, encoding="utf-8")
     importlib.reload(config)
+
+
+def _line_offsets(text: str) -> Tuple[int, ...]:
+    offsets = [0]
+    total = 0
+    for line in text.splitlines(keepends=True):
+        total += len(line)
+        offsets.append(total)
+    return tuple(offsets)
+
+
+def _find_assignment(tree: ast.Module, target_name: str) -> ast.Assign:
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == target_name
+            for target in node.targets
+        ):
+            return node
+    raise ValueError(f"Could not locate assignment for {target_name}")
+
+
+def _extract_signalpin_call(node: ast.Assign, target_name: str) -> ast.Call:
+    if not isinstance(node.value, ast.Call):
+        raise ValueError(f"Expected SignalPin call for {target_name}")
+    return node.value
+
+
+def _keyword_span(call: ast.Call, keyword: str, line_offsets: Tuple[int, ...]) -> Tuple[int, int]:
+    for kw in call.keywords:
+        if kw.arg == keyword:
+            if not hasattr(kw.value, "end_lineno") or kw.value.end_lineno is None:
+                raise ValueError(f"Missing position data for {keyword}")
+            start = line_offsets[kw.value.lineno - 1] + kw.value.col_offset
+            end = line_offsets[kw.value.end_lineno - 1] + kw.value.end_col_offset
+            return start, end
+    raise ValueError(f"Missing keyword {keyword} in SignalPin")
 
 
 @app.route("/")
@@ -274,6 +317,9 @@ def pins_update():
 
     if errors:
         return redirect(url_for("index", alert="; ".join(errors)))
+
+    if len(set(updates.values())) != len(updates):
+        return redirect(url_for("index", alert="GPIO pins must be unique across signals."))
 
     try:
         update_config_file(updates)

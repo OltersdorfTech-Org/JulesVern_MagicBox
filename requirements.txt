@@ -1,2 +1,2 @@
-gpiozero
-Flask
+gpiozero==1.6.2
+Flask==2.3.3

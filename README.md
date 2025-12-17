@@ -111,6 +111,10 @@ pip3 install -r requirements.txt
 pip3 install flask
 ```
 
+- When installing via pip instead of OS packages, ensure a GPIO backend such as
+  `RPi.GPIO` or `lgpio` is available (e.g., `sudo apt install python3-rpi.gpio`
+  on Raspberry Pi OS) so gpiozero can access the hardware.
+
 ### Web UI overview
 
 - Once running, open `http://<pi-ip>:8080`.
