@@ -48,16 +48,24 @@ Raspberry Pi 40-pin header (physical numbers)
   GND  (39) (40) GPIO21
 ```
 
-## Software Setup
+## Software Setup (Bookworm, Pi Zero 2 W)
 
-Tested for Raspberry Pi OS (Bullseye/Bookworm) with Python 3.
+The installer handles dependencies, virtualenv creation, systemd units, and a helper CLI.
 
-1. Update packages: `sudo apt update && sudo apt upgrade -y`
-2. Install GPIO dependencies: `sudo apt install -y python3-gpiozero python3-rpi.gpio`
-3. If working on Windows 10/11 without WSL, download the repo ZIP from GitHub, extract it, and copy the **JulesVern_MagicBox** folder to the SD card’s `boot`/`firmware` partition using File Explorer (see "Windows-only: copy the repo without Git" below). No Git is required on the Pi.
-4. (Optional) Create a venv, then install pip deps: `pip install -r requirements.txt`
-5. **Edit pin mappings and rules:** open `src/config.py` and set BCM pin numbers for all signals (Lid Switch, Key 2 Switch, Key 2 LED, etc.).
-6. Run manually: `python3 src/main.py`
+- **Windows SD card (no Git):** copy the repo to the SD card’s `boot/firmware` partition, boot the Pi, then run
+  ```sh
+  sudo /boot/firmware/JulesVern_MagicBox/sdcard_bootstrap/install.sh
+  ```
+- **On the Pi (one command):** from the repo folder, run
+  ```sh
+  sudo ./INSTALL_MAGIC_BOX.sh
+  ```
+
+After install, use `magicbox status`, `magicbox logs`, or `magicbox restart` to control the service. Full details and failure-mode fixes live in [`docs/INSTALL_PI_ZERO_2W.md`](docs/INSTALL_PI_ZERO_2W.md).
+
+### Manual run (no systemd)
+- **Edit pin mappings and rules:** open `src/config.py` and set BCM pin numbers for all signals (Lid Switch, Key 2 Switch, Key 2 LED, etc.).
+- Run manually: `python3 src/main.py`
 
 ## Running the Program
 
