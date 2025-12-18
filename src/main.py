@@ -18,26 +18,71 @@ import config
 
 
 class RemoteStateStore:
-    """Persist and load the remote LID LED enable flag."""
+    """Persist and load toggleable flags for the controller."""
+
+    DEFAULT_STATE = {
+        "remote_lid_on": True,
+        "magic_flag_on": False,
+        "safety_enabled": False,
+    }
 
     def __init__(self, path: Path) -> None:
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def read(self) -> bool:
+    def _write_state(self, state: dict) -> None:
+        merged = {**self.DEFAULT_STATE, **state}
+        with self.path.open("w", encoding="utf-8") as handle:
+            json.dump(merged, handle)
+
+    def read_all(self) -> dict:
         if not self.path.exists():
-            return True  # default to enabled
+            return dict(self.DEFAULT_STATE)
         with self.path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
-        return bool(data.get("remote_lid_on", True))
+        return {
+            "remote_lid_on": bool(data.get("remote_lid_on", True)),
+            "magic_flag_on": bool(data.get("magic_flag_on", False)),
+            "safety_enabled": bool(data.get("safety_enabled", False)),
+        }
+
+    def read(self) -> bool:
+        return self.read_all()["remote_lid_on"]
+
+    def read_magic(self) -> bool:
+        return self.read_all()["magic_flag_on"]
+
+    def read_safety(self) -> bool:
+        return self.read_all()["safety_enabled"]
 
     def write(self, enabled: bool) -> None:
-        with self.path.open("w", encoding="utf-8") as handle:
-            json.dump({"remote_lid_on": bool(enabled)}, handle)
+        state = self.read_all()
+        state["remote_lid_on"] = bool(enabled)
+        self._write_state(state)
+
+    def write_magic(self, enabled: bool) -> None:
+        state = self.read_all()
+        state["magic_flag_on"] = bool(enabled)
+        self._write_state(state)
+
+    def write_safety(self, enabled: bool) -> None:
+        state = self.read_all()
+        state["safety_enabled"] = bool(enabled)
+        self._write_state(state)
 
     def toggle(self) -> bool:
         new_state = not self.read()
         self.write(new_state)
+        return new_state
+
+    def toggle_magic(self) -> bool:
+        new_state = not self.read_magic()
+        self.write_magic(new_state)
+        return new_state
+
+    def toggle_safety(self) -> bool:
+        new_state = not self.read_safety()
+        self.write_safety(new_state)
         return new_state
 
 
@@ -130,7 +175,14 @@ def build_hardware(stop_event: Event):
     }
 
 
-def update_outputs(hw, remote_lid_on: bool) -> None:
+def update_outputs(hw, remote_lid_on: bool, magic_enabled: bool, safety_enabled: bool) -> None:
+    if not safety_enabled:
+        hw["lid_led"].off()
+        hw["key1_led"].off()
+        hw["key2_led"].off()
+        hw["flicker"].update(False)
+        return
+
     lid_closed = hw["lid_switch"].is_pressed  # active-low switch to GND
     key1_closed = hw["key1_switch"].is_pressed
     key2_closed = hw["key2_switch"].is_pressed
@@ -146,7 +198,7 @@ def update_outputs(hw, remote_lid_on: bool) -> None:
     hw["key2_led"].value = 1 if key2_closed else 0
 
     # Magic LED flicker control
-    should_flicker = config.MAGIC_FLICKER_RULE(lid_closed, remote_lid_on)
+    should_flicker = magic_enabled and config.MAGIC_FLICKER_RULE(lid_closed, remote_lid_on)
     hw["flicker"].update(should_flicker)
 
 
@@ -155,13 +207,18 @@ class ServiceRunner:
         self.stop_event = Event()
         self.remote_store = RemoteStateStore(config.REMOTE_STATE_FILE)
         self.hardware = build_hardware(self.stop_event)
-        self.remote_lid_on = self.remote_store.read()
+        state = self.remote_store.read_all()
+        self.remote_lid_on = state["remote_lid_on"]
+        self.magic_enabled = state["magic_flag_on"]
+        self.safety_enabled = state["safety_enabled"]
 
     def start(self) -> None:
         print("Magic Lid service starting...")
         self._setup_signal_handlers()
         self._attach_switch_handlers()
-        update_outputs(self.hardware, self.remote_lid_on)
+        update_outputs(
+            self.hardware, self.remote_lid_on, self.magic_enabled, self.safety_enabled
+        )
         self._run_loop()
 
     def _setup_signal_handlers(self) -> None:
@@ -182,15 +239,42 @@ class ServiceRunner:
 
     def _handle_state_change(self, message: str) -> None:
         print(message)
-        update_outputs(self.hardware, self.remote_lid_on)
+        update_outputs(
+            self.hardware, self.remote_lid_on, self.magic_enabled, self.safety_enabled
+        )
 
     def _run_loop(self) -> None:
         while not self.stop_event.is_set():
-            new_remote = self.remote_store.read()
-            if new_remote != self.remote_lid_on:
-                self.remote_lid_on = new_remote
-                print(f"Remote LID state updated to: {'ON' if new_remote else 'OFF'}")
-                update_outputs(self.hardware, self.remote_lid_on)
+            new_state = self.remote_store.read_all()
+            if new_state != {
+                "remote_lid_on": self.remote_lid_on,
+                "magic_flag_on": self.magic_enabled,
+                "safety_enabled": self.safety_enabled,
+            }:
+                if new_state["remote_lid_on"] != self.remote_lid_on:
+                    self.remote_lid_on = new_state["remote_lid_on"]
+                    print(
+                        "Remote LID state updated to: "
+                        f"{'ON' if self.remote_lid_on else 'OFF'}"
+                    )
+                if new_state["magic_flag_on"] != self.magic_enabled:
+                    self.magic_enabled = new_state["magic_flag_on"]
+                    print(
+                        "Magic flicker flag updated to: "
+                        f"{'ON' if self.magic_enabled else 'OFF'}"
+                    )
+                if new_state["safety_enabled"] != self.safety_enabled:
+                    self.safety_enabled = new_state["safety_enabled"]
+                    print(
+                        "Safety state updated to: "
+                        f"{'ENABLED' if self.safety_enabled else 'DISABLED'}"
+                    )
+                update_outputs(
+                    self.hardware,
+                    self.remote_lid_on,
+                    self.magic_enabled,
+                    self.safety_enabled,
+                )
             time.sleep(config.MAIN_LOOP_SLEEP_S)
         self._cleanup()
 
@@ -238,7 +322,13 @@ def handle_cli(args: argparse.Namespace, store: RemoteStateStore) -> Optional[bo
         return True
 
     if args.print_status:
-        print(f"Remote LID LED state: {'ON' if store.read() else 'OFF'}")
+        state = store.read_all()
+        print(
+            "Current state: "
+            f"Remote LID {'ON' if state['remote_lid_on'] else 'OFF'}, "
+            f"Magic {'ON' if state['magic_flag_on'] else 'OFF'}, "
+            f"Safety {'ENABLED' if state['safety_enabled'] else 'DISABLED'}"
+        )
         return True
 
     return None

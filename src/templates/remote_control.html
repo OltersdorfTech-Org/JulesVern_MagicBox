@@ -12,6 +12,7 @@
             --accent: #10b981;
             --accent-off: #ef4444;
             --accent-toggle: #f59e0b;
+            --muted: #9ca3af;
         }
         body {
             background: var(--bg);
@@ -23,7 +24,7 @@
             justify-content: center;
         }
         .container {
-            max-width: 480px;
+            max-width: 760px;
             width: 100%;
             padding: 24px 16px 48px;
         }
@@ -33,7 +34,7 @@
         }
         h1 {
             margin: 0 0 8px 0;
-            font-size: 1.6rem;
+            font-size: 1.7rem;
             letter-spacing: 0.5px;
         }
         p {
@@ -45,19 +46,24 @@
             border-radius: 18px;
             padding: 18px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.35);
-        }
-        .buttons {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 12px;
             margin-bottom: 16px;
+        }
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 12px;
+        }
+        .control {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
         }
         button {
             width: 100%;
-            padding: 16px 12px;
+            padding: 14px 12px;
             border: none;
             border-radius: 12px;
-            font-size: 1.2rem;
+            font-size: 1.1rem;
             font-weight: 700;
             color: #0b1220;
             cursor: pointer;
@@ -66,6 +72,10 @@
         button:active {
             transform: translateY(1px);
             box-shadow: none;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
         .on { background: var(--accent); box-shadow: 0 8px 16px rgba(16,185,129,0.35); }
         .off { background: var(--accent-off); box-shadow: 0 8px 16px rgba(239,68,68,0.35); }
@@ -79,10 +89,6 @@
             color: #9ca3af;
             font-size: 0.95rem;
         }
-        .state {
-            font-weight: 700;
-            font-size: 1.1rem;
-        }
         .pill {
             display: inline-block;
             padding: 4px 10px;
@@ -93,6 +99,64 @@
         .pill.on { background: rgba(16,185,129,0.15); color: #bbf7d0; }
         .pill.off { background: rgba(239,68,68,0.2); color: #fecdd3; }
         .pill.unknown { background: rgba(255,255,255,0.08); color: #e5e7eb; }
+        .indicator {
+            font-weight: 800;
+            padding: 4px 10px;
+            border-radius: 12px;
+        }
+        .indicator.on { background: rgba(16,185,129,0.25); color: #c6f6d5; }
+        .indicator.off { background: rgba(239,68,68,0.3); color: #fecdd3; }
+        .label-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+        .badge {
+            background: rgba(255,255,255,0.08);
+            color: #e5e7eb;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .muted { color: var(--muted); font-size: 0.95rem; }
+        .alert {
+            padding: 10px 12px;
+            border-radius: 12px;
+            margin: 8px 0 12px;
+        }
+        .alert.error { background: rgba(239,68,68,0.15); color: #fecdd3; }
+        .alert.success { background: rgba(16,185,129,0.15); color: #bbf7d0; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        th, td {
+            text-align: left;
+            padding: 8px 4px;
+        }
+        tr:nth-child(even) { background: rgba(255,255,255,0.03); }
+        input[type="number"], input[type="text"] {
+            width: 100%;
+            padding: 10px 8px;
+            border-radius: 10px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: #0b1220;
+            color: var(--text);
+            font-size: 1rem;
+        }
+        .diagram {
+            margin-top: 12px;
+            padding: 12px;
+            background: #0b1220;
+            border-radius: 12px;
+            overflow-x: auto;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+            color: #e5e7eb;
+            white-space: pre;
+        }
         footer {
             margin-top: 12px;
             text-align: center;
@@ -107,27 +171,57 @@
             <h1>Magic Lid Web Remote</h1>
             <p>Tap a button to update the remote LID flag. Works best on your trusted home network.</p>
         </header>
+        {% if alert %}
+            <div class="alert error">{{ alert }}</div>
+        {% endif %}
+        {% if notice %}
+            <div class="alert success">{{ notice }}</div>
+        {% endif %}
+
         <div class="card">
-            <div class="buttons">
-                <form method="post" action="{{ url_for('lid_on') }}">
-                    <button class="on" type="submit">Turn Remote LID ON</button>
-                </form>
-                <form method="post" action="{{ url_for('lid_off') }}">
-                    <button class="off" type="submit">Turn Remote LID OFF</button>
-                </form>
-                <form method="post" action="{{ url_for('lid_toggle') }}">
-                    <button class="toggle" type="submit">Toggle Remote LID</button>
+            <div class="control">
+                <div class="label-row">
+                    <div>
+                        <h3 style="margin: 0;">Safety</h3>
+                        <p class="muted">Blocks all GPIO outputs and switch inputs until enabled.</p>
+                    </div>
+                    <span class="indicator {{ 'on' if safety_on else 'off' }}">{{ 'ON' if safety_on else 'OFF' }}</span>
+                </div>
+                <form method="post" action="{{ url_for('safety_toggle') }}">
+                    <button class="toggle" type="submit">{{ 'Disable' if safety_on else 'Enable' }} Safety</button>
                 </form>
             </div>
-            <div class="status">
-                <div>
-                    <label>Remote LID Flag</label>
-                    {% if remote_on %}
-                        <span class="pill on">ON</span>
-                    {% else %}
-                        <span class="pill off">OFF</span>
-                    {% endif %}
+        </div>
+
+        <div class="card">
+            <div class="controls">
+                <div class="control">
+                    <div class="label-row">
+                        <div>
+                            <h3 style="margin: 0;">LID LED Toggle</h3>
+                            <p class="muted">Toggles the stored remote LID flag.</p>
+                        </div>
+                        <span class="indicator {{ 'on' if remote_on else 'off' }}">{{ 'ON' if remote_on else 'OFF' }}</span>
+                    </div>
+                    <form method="post" action="{{ url_for('lid_toggle') }}">
+                        <button class="toggle" type="submit" {% if not safety_on %}disabled{% endif %}>Toggle</button>
+                    </form>
                 </div>
+                <div class="control">
+                    <div class="label-row">
+                        <div>
+                            <h3 style="margin: 0;">magic flicker toggle</h3>
+                            <p class="muted">Enables or disables the Magic LED flicker flag.</p>
+                        </div>
+                        <span class="indicator {{ 'on' if magic_on else 'off' }}">{{ 'ON' if magic_on else 'OFF' }}</span>
+                    </div>
+                    <form method="post" action="{{ url_for('magic_toggle') }}">
+                        <button class="toggle" type="submit" {% if not safety_on %}disabled{% endif %}>Toggle</button>
+                    </form>
+                </div>
+            </div>
+            <p class="muted" style="margin-top: 12px;">Safety must be enabled before either toggle will run.</p>
+            <div class="status">
                 <div>
                     <label>Lid Switch</label>
                     {% if lid_closed is none %}
@@ -140,8 +234,58 @@
                 </div>
             </div>
         </div>
+
+        <div class="card">
+            <div class="label-row">
+                <div>
+                    <h3 style="margin: 0;">GPIO pin configuration</h3>
+                    <p class="muted">Enter physical header pin numbers. Values are written to config.py.</p>
+                </div>
+                <span class="badge">Physical numbering</span>
+            </div>
+            <form method="post" action="{{ url_for('pins_update') }}">
+                <table>
+                    <tr>
+                        <th>Signal</th>
+                        <th>Physical pin</th>
+                    </tr>
+                    <tr>
+                        <td>lid_switch_pin</td>
+                        <td><input type="number" name="lid_switch_pin" value="{{ pins['lid_switch_pin'] or '' }}" required></td>
+                    </tr>
+                    <tr>
+                        <td>lid_led_pin</td>
+                        <td><input type="number" name="lid_led_pin" value="{{ pins['lid_led_pin'] or '' }}" required></td>
+                    </tr>
+                    <tr>
+                        <td>magic_flicker_led_pin</td>
+                        <td><input type="number" name="magic_flicker_led_pin" value="{{ pins['magic_flicker_led_pin'] or '' }}" required></td>
+                    </tr>
+                    <tr>
+                        <td>Key1LED PIN</td>
+                        <td><input type="number" name="key1_led_pin" value="{{ pins['key1_led_pin'] or '' }}" required></td>
+                    </tr>
+                    <tr>
+                        <td>Key2LED PIN</td>
+                        <td><input type="number" name="key2_led_pin" value="{{ pins['key2_led_pin'] or '' }}" required></td>
+                    </tr>
+                    <tr>
+                        <td>Key1switch PIN</td>
+                        <td><input type="number" name="key1_switch_pin" value="{{ pins['key1_switch_pin'] or '' }}" required></td>
+                    </tr>
+                    <tr>
+                        <td>Key2switch PIN</td>
+                        <td><input type="number" name="key2_switch_pin" value="{{ pins['key2_switch_pin'] or '' }}" required></td>
+                    </tr>
+                </table>
+                <button class="on" type="submit" style="margin-top: 10px;">Save pins to config.py</button>
+            </form>
+            <p class="muted">Pins must be integers that map to usable GPIOs. Values for power or ground will be rejected.</p>
+            <div class="diagram">{{ pin_diagram }}</div>
+        </div>
+
         <footer>
-            <p>Controller service keeps LEDs in sync; this page just updates the stored flag.</p>
+            <p>Safety defaults to OFF. Enable it to use the toggles. The controller service keeps LEDs in sync.</p>
         </footer>
     </div>
 </body>
