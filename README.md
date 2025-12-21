@@ -1,8 +1,8 @@
 # Magic Lid GPIO Controller (Raspberry Pi Zero 2 W)
 
-A headless Raspberry Pi project that monitors three switches (lid + two keys) and drives four LEDs. The lid LED can also be controlled remotely via SSH commands from the RaspController app while still respecting the physical lid switch. A background Python service (gpiozero-based) keeps LEDs in sync with switch states, persists a remote enable flag, and supports a future "Magic LED" flicker effect once the desired truth table is confirmed.
+Headless Raspberry Pi project that watches three switches (lid + two keys) and drives four LEDs. A background Python service (gpiozero-based) keeps LEDs in sync with switch states, persists a remote enable flag, and exposes a web UI for toggling the remote LID and Magic flicker flags.
 
-> ⚠️ Several pin numbers from the original request are ambiguous or electrically invalid. Confirm BCM GPIO pins before wiring (physical pin 1 is 3.3 V and **cannot** be used as a GPIO input).
+> ⚠️ Confirm BCM GPIO pins before wiring (physical pin 1 is 3.3 V and **cannot** be used as a GPIO input).
 
 ## I/O Summary
 
@@ -48,44 +48,46 @@ Raspberry Pi 40-pin header (physical numbers)
   GND  (39) (40) GPIO21
 ```
 
-## Software Setup (Bookworm, Pi Zero 2 W)
+## Install (Bookworm, Pi Zero 2 W)
 
-The installer handles dependencies, virtualenv creation, systemd units, and a helper CLI.
+Installer tasks: copies the repo to the target user’s home, ensures writable state/config paths, creates a Python venv, installs dependencies, writes systemd units, and drops a desktop launcher that opens the web UI.
 
-- **Windows SD card (no Git):** copy the repo to the SD card’s `boot/firmware` partition, boot the Pi, then run
-  ```sh
-  sudo /boot/firmware/JulesVern_MagicBox/sdcard_bootstrap/install.sh
-  ```
-- **On the Pi (one command):** from the repo folder, run
-  ```sh
-  sudo ./INSTALL_MAGIC_BOX.sh
-  ```
+**Windows SD card method (no Git)**
+1. Download the repo ZIP on Windows and extract it.
+2. Copy the `JulesVern_MagicBox` folder onto the SD card’s `boot`/`firmware` partition.
+3. Boot the Pi with that card, open Terminal, and run:
+   ```sh
+   sudo /boot/firmware/JulesVern_MagicBox/sdcard_bootstrap/install.sh
+   ```
+   - The installer copies the project to `/home/<user>/JulesVern_MagicBox` (override with `MAGICBOX_TARGET=/path`), fixes ownership, and installs services.
 
-After install, use `magicbox status`, `magicbox logs`, or `magicbox restart` to control the service. Full details and failure-mode fixes live in [`docs/INSTALL_PI_ZERO_2W.md`](docs/INSTALL_PI_ZERO_2W.md).
+**Already on the Pi**
+1. From the checkout directory:
+   ```sh
+   sudo ./INSTALL_MAGIC_BOX.sh
+   ```
+   - Re-runnable; refreshes dependencies and services. To force a different target path or user, set `MAGICBOX_TARGET=/path` and/or `MAGICBOX_USER=<user>` when invoking.
+
+**What you get after install**
+- Services:
+  - `magic_lid.service` (GPIO controller) enabled and started.
+  - `magic_lid_web.service` (Flask web UI) installed, not auto-enabled; enable with `sudo systemctl enable --now magic_lid_web.service`.
+- Helper CLI: `magicbox status|logs|start|stop|restart|install`.
+- Desktop launcher: `Magic Lid Web Remote.desktop` on the target user’s Desktop opens `http://localhost:<port>` (default 8080; override with `MAGICBOX_WEB_PORT`).
+- Writable state/config under the copied repo (e.g., `/home/<user>/JulesVern_MagicBox/state/lid_remote_state.json`), avoiding permission issues on `/boot/firmware`.
+
+See [`docs/INSTALL_PI_ZERO_2W.md`](docs/INSTALL_PI_ZERO_2W.md) for troubleshooting.
 
 ### Manual run (no systemd)
-- **Edit pin mappings and rules:** open `src/config.py` and set BCM pin numbers for all signals (Lid Switch, Key 2 Switch, Key 2 LED, etc.).
-- Run manually: `python3 src/main.py`
+- Edit pin mappings and rules in `src/config.py`.
+- Run: `python3 src/main.py`
 
-## Running the Program
+## Running & logs
 
-- Manual start: `python3 src/main.py`
-- Stop safely: press `Ctrl+C` in the terminal (service traps SIGINT/SIGTERM, turns off LEDs, and cleans GPIO).
-- Logs: when run foreground, prints switch events and remote updates. With systemd, view via `journalctl -u magic_lid.service -f`.
-
-## Autostart (systemd)
-
-A sample unit file is provided at `systemd/magic_lid.service`. Update paths if your checkout lives elsewhere.
-
-```sh
-sudo cp systemd/magic_lid.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable magic_lid.service
-sudo systemctl start magic_lid.service
-sudo systemctl status magic_lid.service
-# Logs
-journalctl -u magic_lid.service -f
-```
+- Foreground: `python3 src/main.py`
+- Stop: `Ctrl+C` (service traps SIGINT/SIGTERM and cleans up GPIO).
+- Logs (systemd): `journalctl -u magic_lid.service -f`
+- Status: `sudo systemctl status magic_lid.service` or `magicbox status`
 
 ## RaspController Integration (remote LID LED)
 
@@ -108,35 +110,19 @@ SSH commands remain supported for power users (or RaspController custom commands
 
 Intent: provide a dead-simple, mobile-friendly way to flip the remote LID LED flag from any browser on your trusted home network. The web UI reuses the same stored flag that the background GPIO controller watches, so hardware behavior stays unchanged.
 
-### Dependencies
-
-- Install pip if needed: `sudo apt install python3-pip`
-- Install Flask (adds to the existing gpiozero dependency):
-
-```sh
-pip3 install -r requirements.txt
-# or
-pip3 install flask
-```
-
 ### Web UI overview
 
-- Once running, open `http://<pi-ip>:8080`.
-- You will see two toggle buttons with indicators beside them:
+- Start (systemd): `sudo systemctl enable --now magic_lid_web.service` or run manually:
+  ```sh
+  cd /home/pi/JulesVern_MagicBox
+  python3 src/web_server.py --port 8080
+  ```
+- Open `http://<pi-ip>:8080` (launcher uses `localhost`).
+- Controls:
+  - **Safety** — must be ON to allow any GPIO output. When OFF, toggles are disabled and outputs stay off.
   - **LID LED Toggle** — flips the stored remote LID flag.
-  - **magic flicker toggle** — flips the Magic Flag controlling the Magic LED flicker permission.
-- A prominent **Safety** control appears above the toggles. Safety defaults to **OFF** on boot; when it is off, the toggles are disabled and the server rejects toggle actions. Enable Safety to allow any GPIO activity.
-- Status text shows the lid switch state (OPEN/CLOSED/Unknown).
-- Intended for local, trusted networks only; no authentication is provided.
-
-### How to run the web UI manually
-
-```sh
-cd /home/pi/JulesVern_MagicBox
-python3 src/web_server.py  # defaults to port 8080
-```
-
-Then browse to `http://<pi-ip>:8080`. Use `hostname -I` on the Pi to print its LAN IP address.
+  - **magic flicker toggle** — flips the Magic flicker flag.
+- Status shows lid switch state and current pin mapping. Intended for trusted LAN only (no auth/TLS).
 
 ### GPIO table from the web UI
 
@@ -151,49 +137,13 @@ Then browse to `http://<pi-ip>:8080`. Use `hostname -I` on the Pi to print its L
 - Inputs must be integers mapped to real GPIO header pins; power/ground pins are rejected. Submitted values rewrite the dataclass entries in `src/config.py`.
 - The Raspberry Pi physical pin diagram (above) is rendered alongside the form to help pick the right header numbers.
 
-### Optional systemd setup for the web UI
-
-Keep the original GPIO controller service enabled. Add a separate unit for the Flask server so both can run together:
-
-```sh
-sudo cp systemd/magic_lid_web.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable magic_lid_web.service
-sudo systemctl start magic_lid_web.service
-sudo systemctl status magic_lid_web.service
-```
-
-After that, powering on the Pi and visiting `http://<pi-ip>:8080` is enough—tap a button and the background controller will pick up the new flag immediately.
+After enabling the web service, visiting `http://<pi-ip>:8080` lets you toggle flags; the background GPIO controller picks them up immediately.
 
 ### Why this design & assumptions
 
-- Reuses the existing `state/lid_remote_state.json` file, adding Magic and Safety flags alongside the remote LID flag.
-- The Flask server only adjusts stored flags, enforces Safety in the routes, and reads the lid switch if possible; it does not drive LEDs directly.
-- Designed for a trusted home LAN (no authentication or TLS); if you need wider exposure, place it behind your own secure reverse proxy.
-
-## Windows-only: copy the repo without Git
-
-If you do not want to install Git on Windows, you can prepare the SD card entirely from File Explorer:
-
-1. Download the repository ZIP from GitHub on your Windows PC.
-2. Insert the Raspberry Pi SD card. Windows should mount the FAT `boot`/`firmware` partition automatically. If it does not, open **Disk Management**, right-click the small FAT partition for the SD card, and assign it a drive letter so it appears in File Explorer.
-3. Extract the ZIP and copy the `JulesVern_MagicBox` folder into the root of the `boot`/`firmware` drive.
-4. Safely eject the card and boot the Pi.
-
-### Move the copied folder on the Pi and run it
-
-After the Pi boots (with the card prepared above), move the project into your home directory and run setup from there:
-
-```sh
-cd /home/pi
-mkdir -p ~/src
-mv /boot/firmware/JulesVern_MagicBox ~/src/
-cd ~/src/JulesVern_MagicBox
-python3 -m venv .venv  # optional
-source .venv/bin/activate || true
-pip install -r requirements.txt
-python3 src/main.py
-```
+- Uses a writable repo location under the target user’s home to avoid FAT partition permission errors.
+- Web server edits `src/config.py` and `state/lid_remote_state.json` within that location; systemd services run as the target user for consistent permissions.
+- Trusted LAN only; place behind your own secure reverse proxy if exposing externally.
 
 ## Configuration
 
