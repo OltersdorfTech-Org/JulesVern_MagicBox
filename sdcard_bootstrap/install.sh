@@ -43,7 +43,7 @@ main() {
     chown -R "$TARGET_USER" "$TARGET_REPO"
   fi
 
-  INSTALLER="$TARGET_REPO/scripts/install_pi.sh"
+  INSTALLER="$TARGET_REPO/install.sh"
   if [ ! -x "$INSTALLER" ]; then
     echo "Installer missing at $INSTALLER" >&2
     exit 1

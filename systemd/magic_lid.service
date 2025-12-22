@@ -1,15 +1,22 @@
 [Unit]
 Description=Magic Lid GPIO controller
-After=multi-user.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/pi/JulesVern_MagicBox
-ExecStart=/usr/bin/python3 /home/pi/JulesVern_MagicBox/src/main.py
+WorkingDirectory=/opt/julesvern
+ExecStart=/opt/julesvern/venv/bin/python /opt/julesvern/src/main.py
 Restart=on-failure
+RestartSec=2
+User=julesvern
+Group=julesvern
 StandardOutput=journal
 StandardError=journal
-User=pi
+Environment=PYTHONUNBUFFERED=1
+Environment=MAGICBOX_DATA_DIR=/var/lib/julesvern
+Environment=MAGICBOX_STATE_DIR=/var/lib/julesvern/state
+SupplementaryGroups=gpio
 
 [Install]
 WantedBy=multi-user.target

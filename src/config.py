@@ -9,14 +9,16 @@ Notes from user clarifications:
 - Key 2 switch/LED must move to their own GPIO pins; defaults below pick free
   GPIOs but can be changed easily.
 """
+import os
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, Callable
 
 # Base directory paths
 BASE_DIR = Path(__file__).resolve().parent.parent
-STATE_DIR = BASE_DIR / "state"
-STATE_DIR.mkdir(exist_ok=True)
+DATA_DIR = Path(os.environ.get("MAGICBOX_DATA_DIR", BASE_DIR / "data"))
+STATE_DIR = Path(os.environ.get("MAGICBOX_STATE_DIR", DATA_DIR / "state"))
+STATE_DIR.mkdir(parents=True, exist_ok=True)
 REMOTE_STATE_FILE = STATE_DIR / "lid_remote_state.json"
 
 # GPIO configuration
