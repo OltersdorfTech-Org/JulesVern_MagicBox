@@ -194,6 +194,22 @@
         </div>
 
         <div class="card">
+            <div class="control">
+                <div class="label-row">
+                    <div>
+                        <h3 style="margin: 0;">System Power</h3>
+                        <p class="muted">Safely shuts down the Raspberry Pi.</p>
+                    </div>
+                    <span class="badge">Confirmation required</span>
+                </div>
+                <form method="post" action="{{ url_for('shutdown') }}" onsubmit="return confirm('Shut down the Magic Box now?');">
+                    <button class="off" type="submit">Shutdown</button>
+                </form>
+                <p class="muted">Use this before removing power to avoid SD card corruption.</p>
+            </div>
+        </div>
+
+        <div class="card">
             <div class="controls">
                 <div class="control">
                     <div class="label-row">

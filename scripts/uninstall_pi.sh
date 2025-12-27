@@ -75,6 +75,8 @@ main() {
   log "Stopping and removing systemd units"
   remove_service "magic_lid.service" "$SYSTEMD_DIR"
   remove_service "magic_lid_web.service" "$SYSTEMD_DIR"
+  remove_service "jv-status-led.service" "$SYSTEMD_DIR"
+  remove_service "jv-poweroff.service" "$SYSTEMD_DIR"
   systemctl daemon-reload
 
   if [ -f "$HELPER_PATH" ]; then
@@ -85,6 +87,11 @@ main() {
   if [ -d "$CONFIG_DIR" ]; then
     rm -rf "$CONFIG_DIR"
     log "Removed config dir $CONFIG_DIR"
+  fi
+
+  if [ -f /etc/sudoers.d/magicbox-poweroff ]; then
+    rm -f /etc/sudoers.d/magicbox-poweroff
+    log "Removed shutdown sudoers rule"
   fi
 
   if [ "${PURGE_REPO:-0}" -eq 1 ]; then

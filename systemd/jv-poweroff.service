@@ -1,0 +1,10 @@
+[Unit]
+Description=Magic Box safe poweroff helper
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl poweroff
+User=root
+
+[Install]
+WantedBy=multi-user.target

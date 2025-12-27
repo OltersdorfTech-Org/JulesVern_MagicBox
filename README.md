@@ -80,8 +80,77 @@ sudo ./install.sh
 - **Autostart on boot:** both services start headlessly after networking is ready; no login or GUI needed.
 - **Web UI:** available at `http://<pi-ip>:8080` by default (override during install with `MAGICBOX_WEB_PORT=<port>`).
 - **Data & config:** remote state lives at `/var/lib/julesvern/state/lid_remote_state.json`. Pin mappings and other tunables remain in `src/config.py` within `/opt/julesvern` (or your chosen install path).
-- **Logging:** all output goes to journald. Follow logs with `journalctl -u magic_lid.service -u magic_lid_web.service -f`.
+- **Logging:** all output goes to journald. Follow logs with `journalctl -u magic_lid.service -u magic_lid_web.service -u jv-status-led.service -f`.
 - **Restart policy:** `Restart=on-failure` with a 2s backoff on both units.
+
+## Web UI
+
+The web UI provides large touch-friendly controls for safety, shutdown, and GPIO configuration.
+Binary assets are not stored in this repository, so screenshots are not embedded here. To capture
+one locally, run the web server and use your preferred screenshot tool.
+
+## Status LED (GPIO12)
+
+**Intent:** expose a single external LED that tells you when the system is booting, ready, or in a fault state.
+
+### Wiring
+- **GPIO12 → resistor (330Ω–1kΩ) → LED anode**, LED cathode → **GND**.
+- BCM numbering only. GPIO12 is physical pin 32.
+
+### LED meanings
+- 1 Hz blink (0.5s on / 0.5s off) = **Booting**
+- Solid ON = **Ready** (main service is active)
+- 2 blinks = **Service failed**
+- 3 blinks = **Wi-Fi not connected**
+- 4 blinks = **Network OK, no internet**
+- 5 blinks = **Disk low**
+
+### Setup
+1. Install the updated systemd unit:
+   ```sh
+   sudo systemctl enable --now jv-status-led.service
+   ```
+2. Watch logs with:
+   ```sh
+   sudo journalctl -u jv-status-led.service -f
+   ```
+
+### Why this design
+- A single daemon owns GPIO12 to prevent GPIO races.
+- Continuous checks keep the LED accurate when Wi-Fi drops or services fail.
+- systemd ordering avoids fragile boot-time sleeps.
+
+### Assumptions
+- The main app service is `magic_lid.service`.
+- `iwgetid` is installed (`wireless-tools`) to detect SSID connectivity.
+
+## Shutdown button (web UI)
+
+**Intent:** provide a safe, user-confirmed shutdown from the web UI.
+
+### Setup
+1. Ensure the helper unit is installed:
+   ```sh
+   sudo systemctl status jv-poweroff.service
+   ```
+2. Ensure the web UI service user can start the helper:
+   ```sh
+   sudo test -f /etc/sudoers.d/magicbox-poweroff && echo "sudoers rule installed"
+   ```
+3. Use the **Shutdown** button in the web UI; confirm the prompt.
+
+### Behavior
+- The UI shows a confirmation prompt before shutdown.
+- On success, the UI reports “Shutting down…” and the Pi powers off safely.
+- Errors (permission, missing systemd) are returned in the UI.
+
+### Why this design
+- A dedicated oneshot systemd unit limits privileges to `systemctl poweroff`.
+- The web UI only triggers the unit, avoiding broad sudo access.
+
+### Assumptions
+- systemd is available on the target OS.
+- The web UI service user can call `systemctl start jv-poweroff.service` (installer writes a minimal sudoers rule).
 
 ## Managing the services
 
@@ -98,9 +167,9 @@ magicbox open          # open http://localhost:<port> on this machine
 ```
 
 Direct systemd equivalents:
-- Status: `sudo systemctl status magic_lid.service magic_lid_web.service`
-- Logs: `sudo journalctl -u magic_lid.service -u magic_lid_web.service -f`
-- Restart: `sudo systemctl restart magic_lid.service magic_lid_web.service`
+- Status: `sudo systemctl status magic_lid.service magic_lid_web.service jv-status-led.service`
+- Logs: `sudo journalctl -u magic_lid.service -u magic_lid_web.service -u jv-status-led.service -f`
+- Restart: `sudo systemctl restart magic_lid.service magic_lid_web.service jv-status-led.service`
 
 ## Configuration & customization
 
