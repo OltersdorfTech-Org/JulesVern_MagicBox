@@ -1,5 +1,10 @@
 # Magic Lid GPIO Controller (Raspberry Pi Zero 2 W)
 
+![Codex](https://img.shields.io/badge/codex-enabled-blue)
+![Python](https://img.shields.io/badge/python-3.x-blue?logo=python&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-in%20progress-yellow)
+![Version](https://img.shields.io/badge/version-unknown-lightgrey)
+
 Headless-ready Raspberry Pi project that watches three switches (lid + two keys), drives four LEDs, and exposes a web UI for toggling the remote LID and Magic flicker flags. The installer now makes the Pi boot straight into both services with no manual `systemctl` steps, while also dropping a desktop launcher for optional debugging.
 
 > ⚠️ Confirm BCM GPIO pins before wiring (physical pin 1 is 3.3 V and **cannot** be used as a GPIO input).
