@@ -74,6 +74,16 @@ ensure_service_user() {
   fi
 }
 
+install_shutdown_sudoers() {
+  local user="$1"
+  local sudoers_file="/etc/sudoers.d/magicbox-poweroff"
+  cat >"$sudoers_file" <<EOF_SUDO
+$user ALL=(root) NOPASSWD: /bin/systemctl start jv-poweroff.service
+EOF_SUDO
+  chmod 440 "$sudoers_file"
+  log "Installed shutdown sudoers rule at $sudoers_file"
+}
+
 create_venv() {
   local python_bin="$1"
   local venv_dir="$2"
@@ -368,6 +378,7 @@ main() {
 
   log "Preparing service user"
   ensure_service_user "$SERVICE_USER" "$SERVICE_HOME"
+  install_shutdown_sudoers "$SERVICE_USER"
 
   log "Copying repo to $TARGET_REPO"
   copy_repo "$SOURCE_REPO_DIR" "$TARGET_REPO"

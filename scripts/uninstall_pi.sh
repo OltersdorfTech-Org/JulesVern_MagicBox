@@ -89,6 +89,11 @@ main() {
     log "Removed config dir $CONFIG_DIR"
   fi
 
+  if [ -f /etc/sudoers.d/magicbox-poweroff ]; then
+    rm -f /etc/sudoers.d/magicbox-poweroff
+    log "Removed shutdown sudoers rule"
+  fi
+
   if [ "${PURGE_REPO:-0}" -eq 1 ]; then
     purge_repo "$REPO_DIR"
   else

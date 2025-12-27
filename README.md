@@ -127,7 +127,11 @@ sudo ./install.sh
    ```sh
    sudo systemctl status jv-poweroff.service
    ```
-2. Use the **Shutdown** button in the web UI; confirm the prompt.
+2. Ensure the web UI service user can start the helper:
+   ```sh
+   sudo test -f /etc/sudoers.d/magicbox-poweroff && echo "sudoers rule installed"
+   ```
+3. Use the **Shutdown** button in the web UI; confirm the prompt.
 
 ### Behavior
 - The UI shows a confirmation prompt before shutdown.
@@ -140,7 +144,7 @@ sudo ./install.sh
 
 ### Assumptions
 - systemd is available on the target OS.
-- The web UI service can call `systemctl start jv-poweroff.service`.
+- The web UI service user can call `systemctl start jv-poweroff.service` (installer writes a minimal sudoers rule).
 
 ## Managing the services
 

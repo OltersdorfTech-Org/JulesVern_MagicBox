@@ -190,23 +190,36 @@ def update_config_file(pin_updates: Dict[str, int]) -> None:
 
 def request_shutdown() -> Optional[str]:
     """Request a safe system shutdown via systemd."""
-    try:
-        result = subprocess.run(
-            ["systemctl", "start", "jv-poweroff.service"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-    except FileNotFoundError:
-        return "systemctl not found on this system."
-    except subprocess.TimeoutExpired:
-        return "Shutdown request timed out."
+    commands = [
+        ["systemctl", "start", "jv-poweroff.service"],
+        ["sudo", "-n", "systemctl", "start", "jv-poweroff.service"],
+    ]
 
-    if result.returncode != 0:
+    last_error = None
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except FileNotFoundError:
+            last_error = f"Command not found: {command[0]}"
+            continue
+        except subprocess.TimeoutExpired:
+            last_error = "Shutdown request timed out."
+            continue
+
+        if result.returncode == 0:
+            return None
+
         stderr = result.stderr.strip() or result.stdout.strip()
-        return stderr or "Shutdown request failed."
-    return None
+        if stderr:
+            last_error = stderr
+
+    return last_error or "Shutdown request failed."
 
 
 @app.route("/")
