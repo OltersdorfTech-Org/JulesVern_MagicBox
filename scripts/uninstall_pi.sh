@@ -75,6 +75,8 @@ main() {
   log "Stopping and removing systemd units"
   remove_service "magic_lid.service" "$SYSTEMD_DIR"
   remove_service "magic_lid_web.service" "$SYSTEMD_DIR"
+  remove_service "jv-status-led.service" "$SYSTEMD_DIR"
+  remove_service "jv-poweroff.service" "$SYSTEMD_DIR"
   systemctl daemon-reload
 
   if [ -f "$HELPER_PATH" ]; then

@@ -1,0 +1,20 @@
+[Unit]
+Description=Magic Box status LED daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/julesvern
+ExecStart=/opt/julesvern/venv/bin/python /opt/julesvern/src/hardware/status_led_daemon.py
+Restart=always
+RestartSec=2
+User=julesvern
+Group=julesvern
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+SupplementaryGroups=gpio
+
+[Install]
+WantedBy=multi-user.target

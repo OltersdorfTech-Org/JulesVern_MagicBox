@@ -9,6 +9,7 @@ trusted home networks.
 import argparse
 import importlib
 import re
+import subprocess
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -187,6 +188,27 @@ def update_config_file(pin_updates: Dict[str, int]) -> None:
     importlib.reload(config)
 
 
+def request_shutdown() -> Optional[str]:
+    """Request a safe system shutdown via systemd."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "start", "jv-poweroff.service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except FileNotFoundError:
+        return "systemctl not found on this system."
+    except subprocess.TimeoutExpired:
+        return "Shutdown request timed out."
+
+    if result.returncode != 0:
+        stderr = result.stderr.strip() or result.stdout.strip()
+        return stderr or "Shutdown request failed."
+    return None
+
+
 @app.route("/")
 def index():
     status = build_status_payload()
@@ -281,6 +303,14 @@ def pins_update():
         return redirect(url_for("index", alert=f"Failed to update config: {exc}"))
 
     return redirect(url_for("index", notice="GPIO pins updated in config.py"))
+
+
+@app.post("/shutdown")
+def shutdown():
+    error = request_shutdown()
+    if error:
+        return redirect(url_for("index", alert=f"Shutdown failed: {error}"))
+    return redirect(url_for("index", notice="Shutdown requested. System will power off shortly."))
 
 
 def parse_args() -> argparse.Namespace:
