@@ -9,6 +9,7 @@ trusted home networks.
 import argparse
 import importlib
 import re
+import subprocess
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -187,6 +188,40 @@ def update_config_file(pin_updates: Dict[str, int]) -> None:
     importlib.reload(config)
 
 
+def request_shutdown() -> Optional[str]:
+    """Request a safe system shutdown via systemd."""
+    commands = [
+        ["systemctl", "start", "jv-poweroff.service"],
+        ["sudo", "-n", "systemctl", "start", "jv-poweroff.service"],
+    ]
+
+    last_error = None
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except FileNotFoundError:
+            last_error = f"Command not found: {command[0]}"
+            continue
+        except subprocess.TimeoutExpired:
+            last_error = "Shutdown request timed out."
+            continue
+
+        if result.returncode == 0:
+            return None
+
+        stderr = result.stderr.strip() or result.stdout.strip()
+        if stderr:
+            last_error = stderr
+
+    return last_error or "Shutdown request failed."
+
+
 @app.route("/")
 def index():
     status = build_status_payload()
@@ -281,6 +316,14 @@ def pins_update():
         return redirect(url_for("index", alert=f"Failed to update config: {exc}"))
 
     return redirect(url_for("index", notice="GPIO pins updated in config.py"))
+
+
+@app.post("/shutdown")
+def shutdown():
+    error = request_shutdown()
+    if error:
+        return redirect(url_for("index", alert=f"Shutdown failed: {error}"))
+    return redirect(url_for("index", notice="Shutdown requested. System will power off shortly."))
 
 
 def parse_args() -> argparse.Namespace:

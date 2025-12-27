@@ -41,7 +41,7 @@ install_apt_packages() {
   log "Installing system packages via apt..."
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y
-  apt-get install -y python3 python3-venv python3-pip python3-gpiozero python3-rpi.gpio
+  apt-get install -y python3 python3-venv python3-pip python3-gpiozero python3-rpi.gpio wireless-tools
 }
 
 copy_repo() {
@@ -74,6 +74,16 @@ ensure_service_user() {
   fi
 }
 
+install_shutdown_sudoers() {
+  local user="$1"
+  local sudoers_file="/etc/sudoers.d/magicbox-poweroff"
+  cat >"$sudoers_file" <<EOF_SUDO
+$user ALL=(root) NOPASSWD: /bin/systemctl start jv-poweroff.service
+EOF_SUDO
+  chmod 440 "$sudoers_file"
+  log "Installed shutdown sudoers rule at $sudoers_file"
+}
+
 create_venv() {
   local python_bin="$1"
   local venv_dir="$2"
@@ -97,6 +107,7 @@ write_systemd_unit() {
   local user="$5"
   local data_dir="$6"
   local state_dir="$7"
+  local restart_policy="${8:-on-failure}"
 
   cat >"$unit_path" <<EOF_UNIT
 [Unit]
@@ -110,13 +121,30 @@ User=$user
 Group=$user
 WorkingDirectory=$workdir
 ExecStart=$exec_cmd
-Restart=on-failure
+Restart=$restart_policy
 RestartSec=2
 TimeoutStopSec=15
 Environment=PYTHONUNBUFFERED=1
 Environment=MAGICBOX_DATA_DIR=$data_dir
 Environment=MAGICBOX_STATE_DIR=$state_dir
 SupplementaryGroups=gpio
+
+[Install]
+WantedBy=multi-user.target
+EOF_UNIT
+  log "Wrote systemd unit $unit_path"
+}
+
+write_poweroff_unit() {
+  local unit_path="$1"
+  cat >"$unit_path" <<'EOF_UNIT'
+[Unit]
+Description=Magic Box safe poweroff helper
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl poweroff
+User=root
 
 [Install]
 WantedBy=multi-user.target
@@ -150,6 +178,18 @@ install_services() {
     "$user" \
     "$data_dir" \
     "$state_dir"
+
+  write_systemd_unit \
+    "$systemd_dir/jv-status-led.service" \
+    "Magic Box status LED daemon" \
+    "$venv_dir/bin/python $repo_dir/src/hardware/status_led_daemon.py" \
+    "$repo_dir" \
+    "$user" \
+    "$data_dir" \
+    "$state_dir" \
+    "always"
+
+  write_poweroff_unit "$systemd_dir/jv-poweroff.service"
 }
 
 install_helper_command() {
@@ -164,7 +204,7 @@ DEFAULT_REPO_DIR="/opt/julesvern"
 DEFAULT_VENV_DIR="$DEFAULT_REPO_DIR/venv"
 DEFAULT_USER="julesvern"
 DEFAULT_DATA_DIR="/var/lib/julesvern"
-SERVICES=(magic_lid.service magic_lid_web.service)
+SERVICES=(magic_lid.service magic_lid_web.service jv-status-led.service)
 
 if [ -f "$CONFIG_FILE" ]; then
   # shellcheck source=/dev/null
@@ -187,6 +227,7 @@ magicbox status          # status for both services
 magicbox logs            # follow combined logs
 magicbox logs-main       # follow GPIO service logs
 magicbox logs-web        # follow web service logs
+magicbox logs-led        # follow status LED logs
 magicbox open            # open the web UI in a browser on this machine
 USAGE
 }
@@ -232,13 +273,16 @@ case "$cmd" in
     exec sudo systemctl status "${SERVICES[@]}"
     ;;
   logs)
-    exec sudo journalctl -u magic_lid.service -u magic_lid_web.service -f
+    exec sudo journalctl -u magic_lid.service -u magic_lid_web.service -u jv-status-led.service -f
     ;;
   logs-main)
     exec sudo journalctl -u magic_lid.service -f
     ;;
   logs-web)
     exec sudo journalctl -u magic_lid_web.service -f
+    ;;
+  logs-led)
+    exec sudo journalctl -u jv-status-led.service -f
     ;;
   open)
     open_url
@@ -305,7 +349,8 @@ start_services() {
   systemctl daemon-reload
   systemctl enable --now magic_lid.service
   systemctl enable --now magic_lid_web.service
-  log "Services enabled: magic_lid.service, magic_lid_web.service"
+  systemctl enable --now jv-status-led.service
+  log "Services enabled: magic_lid.service, magic_lid_web.service, jv-status-led.service"
 }
 
 main() {
@@ -333,6 +378,7 @@ main() {
 
   log "Preparing service user"
   ensure_service_user "$SERVICE_USER" "$SERVICE_HOME"
+  install_shutdown_sudoers "$SERVICE_USER"
 
   log "Copying repo to $TARGET_REPO"
   copy_repo "$SOURCE_REPO_DIR" "$TARGET_REPO"
@@ -358,7 +404,7 @@ main() {
   create_desktop_launcher "$LAUNCHER_USER" "$WEB_PORT" "$DESKTOP_PATH"
   start_services
 
-  log "SUCCESS: Magic Box installed. Next steps:\n  - Status: sudo systemctl status magic_lid.service magic_lid_web.service\n  - Logs: sudo journalctl -u magic_lid.service -u magic_lid_web.service -f\n  - Helper: magicbox status | magicbox logs"
+  log "SUCCESS: Magic Box installed. Next steps:\n  - Status: sudo systemctl status magic_lid.service magic_lid_web.service jv-status-led.service\n  - Logs: sudo journalctl -u magic_lid.service -u magic_lid_web.service -u jv-status-led.service -f\n  - Helper: magicbox status | magicbox logs"
 }
 
 main "$@"
