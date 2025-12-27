@@ -83,6 +83,12 @@ sudo ./install.sh
 - **Logging:** all output goes to journald. Follow logs with `journalctl -u magic_lid.service -u magic_lid_web.service -u jv-status-led.service -f`.
 - **Restart policy:** `Restart=on-failure` with a 2s backoff on both units.
 
+## Web UI
+
+The web UI provides large touch-friendly controls for safety, shutdown, and GPIO configuration.
+Binary assets are not stored in this repository, so screenshots are not embedded here. To capture
+one locally, run the web server and use your preferred screenshot tool.
+
 ## Status LED (GPIO12)
 
 **Intent:** expose a single external LED that tells you when the system is booting, ready, or in a fault state.
