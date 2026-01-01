@@ -1,224 +1,212 @@
-# GPT-Codex Prompt — JulesVern_MagicBox: GPIO12 Status LED + Fault Blink Patterns + GUI Shutdown Button
+# CODEX PROMPT — JulesVern_MagicBox (Raspberry Pi) Logging + Service Boot Fix + GPIO Noise + LED Status Codes + Web Log Viewer
 
-Repo: https://github.com/OltersdorfTech-Org/JulesVern_MagicBox  
-Target hardware: Raspberry Pi Zero 2 W (headless), Raspberry Pi OS (Lite OK)  
-GPIO status LED pin: **BCM GPIO 12**
+Repo: https://github.com/OltersdorfTech-Org/JulesVern_MagicBox
 
-## Objective
-1) Add a single external **status LED** driven by **BCM GPIO 12** with:
-- BOOTING indication
-- READY (solid on) when the main app is truly running
-- Fault blink patterns for common failures (Wi-Fi, service crash, “etc”)
+You are Codex acting as a senior Raspberry Pi + Python reliability engineer. Make changes directly in the repo with clean commits and update docs. Do NOT add an installer; this is a Pi app. Assume headless operation is common.
 
-2) Add a **Shutdown** button in the existing GUI that triggers a **safe Pi shutdown** (no yanking power).
+## Problem recap (from physical Pi testing)
+- Status LED on GPIO12 starts, but shows 2-blink “service failed” (main service not reliably starting on boot).
+- No logs are being stored persistently.
+- User doesn’t know how to view logs on a running headless system.
+- Running `Main.py` manually spams `KEY2 pressed/released` repeatedly with **no physical GPIO connection** (likely floating input / missing pull-up/down / bounce).
+- When external LEDs or multimeter connected, no state changes observed when switches triggered (aside from GPIO12 status LED).
+- Need logging that is **stored on SD card**, accessible by a Windows machine (not in RAM).
+- README must document clear commands to check status, view logs, start/stop/restart services.
+- Update LED meaning table to specific codes below.
+- Web GUI: add a **show/hide logs** section at the very bottom that streams/loads logs from disk.
 
-Deliverables must be committed to the repo:
-- Python module(s) for LED control + fault monitoring
-- systemd unit file(s) to wire LED state to service lifecycle (no sleeps)
-- GUI changes + backend endpoint/handler for shutdown
-- README/docs updates
-
-No installers. No GUI dependencies beyond what the repo already uses. No blocking boot.
-
----
-
-## Part A — Status LED (GPIO12)
-
-### Hardware
-- LED + series resistor (330Ω–1kΩ) wired: **GPIO12 → resistor → LED anode**, LED cathode → **GND**
-- GPIO is 3.3V. Keep current modest.
-
-### LED states (exact patterns)
-Use these patterns exactly (single LED):
-
-1) **BOOTING**
-- Pattern: `1 Hz` blink = 0.5s ON / 0.5s OFF (loop)
-- Active at boot until READY or a FAULT is asserted.
-
-2) **READY**
-- Pattern: solid ON
-- Active only when the main application service is confirmed running (`systemd active`).
-
-3) **FAULT: MAIN SERVICE FAILED**
-- Pattern: **2 quick blinks** then long pause (loop)
-  - 0.15s ON / 0.15s OFF repeated 2 times
-  - then 1.2s OFF pause
-
-4) **FAULT: WIFI NOT CONNECTED**
-- Pattern: **3 quick blinks** then long pause (loop)
-  - same timing, 3 blinks
-
-5) **FAULT: NETWORK OK BUT NO INTERNET** (etc example)
-- Pattern: **4 quick blinks** then long pause (loop)
-
-6) **FAULT: DISK LOW / DISK FULL** (etc example)
-- Pattern: **5 quick blinks** then long pause (loop)
-
-### Fault priority (highest wins if multiple faults)
-1. Disk low (5)
-2. Service failed (2)
-3. Wi-Fi not connected (3)
-4. No internet (4)
-Else READY or BOOTING.
+## High-level goals
+1) Make the main service start reliably on boot (systemd).
+2) Implement robust, persistent logging to SD card (rotating logs), plus journald integration.
+3) Fix GPIO input noise/floating behavior that produces phantom KEY2 events.
+4) Ensure switch->LED behaviors actually toggle GPIO outputs (and document pin mapping).
+5) Implement new status LED blink codes on GPIO12:
+   - 1 Hz blink (0.5s on / 0.5s off) = Booting
+   - Solid ON = Ready (main service active)
+   - 2 blinks = Main Service failed
+   - 3 blinks = Web Service Failed
+   - 4 blinks = Wi-Fi not connected
+   - 5 blinks = Network OK, no internet
+   - 6 blinks = Disk low
+6) Web GUI: bottom section with “Show logs” toggle; view latest N lines; optionally auto-refresh.
+7) README: copy-pasteable Pi commands for logs + service control + health checks.
 
 ---
 
-## Part B — Architecture / Implementation Requirements
+# Implementation requirements
 
-### 1) GPIO ownership: single daemon
-Implement a single long-running “LED daemon” that exclusively owns GPIO12 to avoid races.
-Suggested files (adjust to repo conventions):
-- `hardware/status_led.py` (core GPIO + patterns)
-- `hardware/status_led_daemon.py` (fault checks + mode selection + loop)
+## A) Logging (persistent, SD-card, Windows accessible)
+- Create a single canonical log directory on the Pi that is on the SD card:
+  - Prefer: `/var/log/julesverne_magicbox/`
+  - Ensure it is created on install/first run and writable by the service user.
+- Use Python `logging` with `RotatingFileHandler` (or TimedRotatingFileHandler) so logs never grow unbounded.
+  - Example files:
+    - `/var/log/julesverne_magicbox/main.log`
+    - `/var/log/julesverne_magicbox/web.log`
+    - `/var/log/julesverne_magicbox/gpio.log` (optional; can also be merged into main)
+- Logs MUST be plain text and readable when SD card is mounted on Windows (ext4 isn’t natively readable on Windows; so also provide **a “copy logs to FAT/boot partition” helper**):
+  - Implement a CLI command or script that copies the latest logs to `/boot/jv_logs/` (or `/boot/firmware/jv_logs/` depending on Pi OS) so a Windows machine can read them without ext4 support.
+  - The script should create the destination directory if missing.
+  - Name it something like: `tools/export_logs_to_boot.py` and document usage in README.
+- Also ensure the systemd service logs are visible via journald:
+  - StandardOutput=journal
+  - StandardError=journal
+- Add a small “startup banner” log line including git commit hash (if available), hostname, IP(s), disk free %, and app version.
 
-**Must support:**
-- BCM numbering
-- `set_mode("booting" | "ready" | "fault_service" | "fault_wifi" | "fault_internet" | "fault_disk")`
-- clean shutdown: LED OFF on exit; GPIO cleanup
-- no silent failures: log exceptions clearly
+## B) systemd service reliability
+- Inspect existing systemd unit(s) in the repo. Fix them so the service starts after network is usable and the filesystem is ready.
+- Requirements for the **main** service unit:
+  - `Restart=on-failure` with a sensible backoff (RestartSec=2 or 5)
+  - `WorkingDirectory` set correctly
+  - Use absolute paths to python and to the main entrypoint
+  - Ensure it runs as a non-root user unless GPIO library requires root; if root is required, document it and keep scope minimal.
+  - Add `Environment=PYTHONUNBUFFERED=1`
+  - If the web service is separate, ensure it has its own unit and dependency chain.
+- Add a `jvmb-health` command (simple script) that prints:
+  - service status (systemctl is-active)
+  - last 20 journal lines
+  - last 20 lines of main.log
+  - wifi status + IP
+  - internet reachability (ping 1.1.1.1 and/or DNS)
+  - disk free %
+- Document service names in README and keep them consistent.
 
-Library choice:
-- Prefer `gpiozero` if already used/available; otherwise use `RPi.GPIO`.
-- Keep dependencies minimal and documented.
+## C) Fix floating GPIO inputs / phantom KEY2
+- Find the GPIO input handling for KEY2 (and other keys).
+- Implement BOTH software and hardware-safe defaults:
+  1) In code: configure inputs with explicit pull-up or pull-down resistors via the GPIO library:
+     - For RPi.GPIO: `GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)` (or PUD_DOWN)
+     - For gpiozero: use `Button(pin, pull_up=True, bounce_time=...)`
+  2) Add debounce:
+     - For interrupts: `bouncetime=50` to `200` ms depending on switch
+     - For polling: implement stable-state detection (e.g., require N consistent reads over M ms)
+- If KEY2 is truly analog in the design, but is being read as digital, correct the design:
+  - If there is no ADC hardware, do NOT treat it as analog.
+  - If the pin is unused/optional, disable it by default and require enabling in config.
+- Ensure with **nothing connected** to KEY2 pin, it does not spam events.
+- Add a debug log for key state transitions with rate limiting (don’t flood logs).
 
-### 2) Detection rules (implement these checks)
+## D) Ensure LED/switch IO actually changes state
+- Locate the outputs for the “other LEDs” (not the status LED).
+- Ensure outputs are configured as outputs and set high/low properly.
+- Confirm pin numbering scheme (BCM vs BOARD) is consistent everywhere.
+- Add a single config file (or constants module) defining all GPIO pins and whether they are active-high/active-low.
+- Add a CLI test tool: `tools/gpio_selftest.py` that:
+  - blinks each output LED in sequence
+  - prints the input states
+  - optionally runs an input monitor for 10 seconds
+- This tool must be safe and not require the full GUI to run.
 
-**Wi-Fi not connected (fault_wifi):** consider connected only if:
-- interface `wlan0` exists AND
-- it has an IPv4 address AND
-- an SSID is present (e.g., `iwgetid -r` returns non-empty) OR a reliable network state indicates up
+## E) Status LED patterns on GPIO12
+- Implement a robust status LED controller that:
+  - runs in its own thread/task
+  - can be updated at runtime (booting -> ready -> error codes)
+  - avoids blocking the main thread
+- Behavior:
+  - Booting: 1 Hz blink (0.5s on / 0.5s off)
+  - Ready: solid on
+  - Errors: blink N times, pause, repeat (e.g. blink-blink … pause 1.5s … repeat)
+- Define error states:
+  - 2 = Main Service failed
+  - 3 = Web Service Failed
+  - 4 = Wi-Fi not connected
+  - 5 = Network OK, no internet
+  - 6 = Disk low
+- Implement checks:
+  - Wi-Fi connected: check `iwgetid -r` or `nmcli -t -f ACTIVE,SSID dev wifi` depending on availability; handle missing commands gracefully.
+  - Internet: ping 1.1.1.1 OR attempt DNS resolve + HTTP HEAD to a stable endpoint; keep timeouts short.
+  - Disk low: threshold configurable (default warn < 10% free or < 1GB free). Use `shutil.disk_usage`.
+- Priority rules:
+  - If main service is running normally: show Ready (solid on) unless a higher-priority warning should override (disk low, no internet, etc.). Decide a clear priority order and document it.
+  - If web service is down but main is up: show 3 blinks.
+  - If main is down: show 2 blinks.
 
-**No internet (fault_internet):** only if Wi-Fi connected.
-- Confirm internet with a short-timeout check (prefer TCP connect over ICMP):
-  - example: TCP connect to `1.1.1.1:443` or `8.8.8.8:53` (timeout ~2s)
-  - optionally DNS resolve + connect, but do not hang if DNS is broken
+## F) Web GUI: show/hide logs at bottom
+- Identify the web app framework (Flask/FastAPI/etc.).
+- Add a collapsible section at the very bottom:
+  - Button: “Show logs” / “Hide logs”
+  - When shown:
+    - Dropdown: main.log / web.log
+    - Text area: last N lines (default 200)
+    - Optional auto-refresh every 2 seconds (toggle)
+- Logs must be read from the SD-card log directory.
+- Ensure log read is safe:
+  - no huge file reads
+  - handle file missing
+  - sanitize output (escape HTML)
+- Add a small endpoint like `/api/logs?file=main&lines=200` returning JSON.
 
-**Disk low (fault_disk):**
-- check `/` free space < threshold (configurable constant, default 5%)
+## G) README updates (must be concrete and copy/pasteable)
+Update README with a “Pi Ops Quickstart” section including:
 
-**Service failed (fault_service):**
-- if the main application systemd service is not `active`
-- avoid false positives during early boot by using systemd ordering, not sleeps
+### View service status
+- `sudo systemctl status <MAIN_SERVICE_NAME> --no-pager`
+- `sudo systemctl status <WEB_SERVICE_NAME> --no-pager` (if exists)
 
-### 3) Configuration (single source of truth)
-Add constants near top of module (or a tiny config file) for:
-- `GPIO_PIN = 12`
-- disk threshold percent
-- internet check targets + timeouts
-- main service name (whatever this repo uses — define it once and reference it)
+### View logs (journald)
+- `sudo journalctl -u <MAIN_SERVICE_NAME> -n 200 --no-pager`
+- `sudo journalctl -u <MAIN_SERVICE_NAME> -f`
+- Same for web service
 
----
+### View persistent log files
+- `sudo tail -n 200 /var/log/julesverne_magicbox/main.log`
+- `sudo tail -n 200 /var/log/julesverne_magicbox/web.log`
+- `sudo ls -lah /var/log/julesverne_magicbox/`
 
-## Part C — systemd integration (required; no sleeps)
+### Restart / stop / start
+- `sudo systemctl restart <MAIN_SERVICE_NAME>`
+- `sudo systemctl stop <MAIN_SERVICE_NAME>`
+- `sudo systemctl start <MAIN_SERVICE_NAME>`
 
-Goal: LED reflects system truth via systemd lifecycle.
+### Export logs to Windows-readable partition
+- `sudo python3 tools/export_logs_to_boot.py`
+- Mention where it copies to (e.g. `/boot/jv_logs/`) and that Windows can read those files.
 
-### Required behavior
-- On boot: LED enters **BOOTING** pattern early.
-- When main app is truly running: LED becomes **READY** (solid ON).
-- If main app stops/crashes: LED switches to **FAULT: SERVICE FAILED** (2 blinks) unless a higher-priority fault is present.
-- If Wi-Fi drops: LED switches to **FAULT: WIFI** (3 blinks), etc.
+### Health check
+- `python3 tools/jvmb_health.py` (or similar) and what it prints.
 
-### Implementation approach (choose one, but keep it deterministic)
-Preferred: one dedicated daemon service, started at boot, that:
-- starts in BOOTING
-- waits for systemd + network targets (ordering, not sleeps)
-- continuously evaluates faults + main service state
-- updates LED accordingly
+### LED status meanings
+Include the exact mapping:
+- 1 Hz blink (0.5s on / 0.5s off) = Booting
+- Solid ON = Ready (main service is active)
+- 2 blinks = Main Service failed
+- 3 blinks = Web Service Failed
+- 4 blinks = Wi-Fi not connected
+- 5 blinks = Network OK, no internet
+- 6 blinks = Disk low
 
-Create/update systemd units under repo-managed path, e.g.:
-- `systemd/jv-status-led.service` (new)
-- (optional) `systemd/jv-status-led.path` or timers not required; keep simple
-
-The LED daemon service should:
-- `Restart=always`
-- run as a user that has GPIO access (usually root on Pi OS; that’s acceptable here)
-- use `After=multi-user.target network-online.target`
-- use `Wants=network-online.target`
-
-**Important:** do NOT let READY be set via a blind `ExecStartPost` alone; the daemon must continuously correct state if Wi-Fi drops or the service fails.
-
----
-
-## Part D — GUI: Add “Shutdown” Button
-
-### Requirement
-Codex must add a **Shutdown** button to the existing GUI that triggers a **safe system shutdown**.
-
-“Safe shutdown” means:
-- requests system shutdown via OS (systemd)
-- no abrupt power cut
-- should return a user-visible confirmation in the UI (“Shutting down…”)
-
-### Implementation details (must be secure and reliable)
-1) Add a GUI control labeled exactly:
-- **Shutdown**
-
-2) On click:
-- call an existing backend route/controller if the app is web-based, or a Python handler if local GUI
-- trigger shutdown command:
-  - preferred: `systemctl poweroff`
-  - acceptable: `shutdown -h now`
-- use a short delay before actual shutdown only if needed to return the UI response (but do NOT rely on sleeps for correctness)
-
-3) Permissions:
-- If the GUI/backend process is not running as root, add a safe mechanism:
-  - Option A (preferred): a dedicated systemd oneshot service `jv-poweroff.service` that runs `systemctl poweroff`, and the GUI calls `systemctl start jv-poweroff.service`
-  - Option B: sudoers rule allowing only the required command with no password
-- Do NOT grant broad sudo privileges.
-
-4) Safety / UX:
-- Add a confirmation dialog (e.g., “Are you sure?”) to prevent misclick shutdown.
-- Ensure errors are shown in the UI if shutdown request fails (permission denied, missing systemd, etc.).
-- The UI should not just close locally; it should explicitly show status.
-
-### Headless compatibility
-Shutdown button must work in headless mode where the UI is accessed remotely (if web UI), or when GUI runs locally. Do not require a desktop environment if the system is headless + web-based.
-
----
-
-## Part E — Documentation
-
-Update `README.md` and add `docs/STATUS_LED.md`:
-
-### README additions
-- Wiring: GPIO12 → resistor → LED → GND (BCM numbering)
-- LED meanings:
-  - 1 Hz blink = booting
-  - solid ON = ready
-  - 2 blinks = service failed
-  - 3 blinks = wifi not connected
-  - 4 blinks = no internet
-  - 5 blinks = disk low
-- Shutdown button behavior + confirmation
-- Troubleshooting notes (if LED never goes solid, service did not become active)
-
-### STATUS_LED.md checklist
-Manual verification steps:
-- boot: observe 1 Hz blink
-- when app running: solid ON
-- stop app service: 2-blink fault
-- disconnect wifi: 3-blink fault
-- break internet route: 4-blink fault
-- simulate disk low by temporarily raising threshold: 5-blink fault
-- click Shutdown: system powers off safely
-
----
-
-## Acceptance Criteria (must pass)
-- GPIO 12 is used in BCM mode
-- LED is OFF at process exit; no stuck ON after stop
-- No boot “sleep hacks”
-- LED state is accurate during runtime changes (wifi drop, service crash)
-- Shutdown button works reliably and safely, with confirmation + error reporting
-- Docs updated and accurate
-- No new installers or binaries introduced
+Also add a “GPIO troubleshooting” note:
+- Explain floating inputs + need for pull-up/down.
+- State which pins use internal pull-ups and expected wiring.
 
 ---
 
-## Notes / Constraints
-- Keep changes minimal and consistent with the repo’s existing structure.
-- Prefer standard library + minimal Pi packages.
-- Do not break existing behavior unrelated to LED/shutdown.
+# Constraints
+- Prefer standard library + minimal dependencies.
+- Keep code clean and testable; add unit tests where reasonable (e.g., for status decision logic, log export path selection).
+- Don’t break current functionality: app should still run manually with `python3 Main.py` (or documented entrypoint).
+- If multiple entrypoints exist (Main.py, web server), unify into a clear structure but do not do a massive rewrite unless necessary.
 
-END PROMPT
+---
+
+# Deliverables (must be included in PR)
+1) Code changes implementing A–F.
+2) Updated systemd unit files (or installer docs if units are generated).
+3) New tools:
+   - `tools/export_logs_to_boot.py`
+   - `tools/gpio_selftest.py`
+   - `tools/jvmb_health.py`
+4) Updated README with the exact command lines and LED mapping above.
+5) A brief CHANGELOG entry (or release notes section) summarizing the fix.
+
+---
+
+# Acceptance tests (you must validate logically and via code)
+- With no GPIO wiring connected: no repeated KEY2 pressed/released spam.
+- After boot, main service becomes active and status LED goes solid ON.
+- If main service fails to start: status LED shows 2 blinks repeating; `journalctl` shows error; persistent log file exists.
+- Logs are written to `/var/log/julesverne_magicbox/` and rotate correctly.
+- Running `tools/export_logs_to_boot.py` creates `/boot/jv_logs/` (or `/boot/firmware/jv_logs/`) and copies recent logs.
+- Web GUI shows logs in the new bottom toggle section and can fetch last N lines without freezing.
+
+Proceed to implement now.
