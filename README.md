@@ -85,14 +85,60 @@ sudo ./install.sh
 - **Autostart on boot:** both services start headlessly after networking is ready; no login or GUI needed.
 - **Web UI:** available at `http://<pi-ip>:8080` by default (override during install with `MAGICBOX_WEB_PORT=<port>`).
 - **Data & config:** remote state lives at `/var/lib/julesvern/state/lid_remote_state.json`. Pin mappings and other tunables remain in `src/config.py` within `/opt/julesvern` (or your chosen install path).
-- **Logging:** all output goes to journald. Follow logs with `journalctl -u magic_lid.service -u magic_lid_web.service -u jv-status-led.service -f`.
+- **Logging:** persistent logs are written to `/var/log/julesverne_magicbox/` and also stream to journald.
 - **Restart policy:** `Restart=on-failure` with a 2s backoff on both units.
+
+## Pi Ops Quickstart
+
+### View service status
+```sh
+sudo systemctl status magic_lid.service --no-pager
+sudo systemctl status magic_lid_web.service --no-pager
+```
+
+### View logs (journald)
+```sh
+sudo journalctl -u magic_lid.service -n 200 --no-pager
+sudo journalctl -u magic_lid.service -f
+sudo journalctl -u magic_lid_web.service -n 200 --no-pager
+```
+
+### View persistent log files
+```sh
+sudo tail -n 200 /var/log/julesverne_magicbox/main.log
+sudo tail -n 200 /var/log/julesverne_magicbox/web.log
+sudo ls -lah /var/log/julesverne_magicbox/
+```
+
+### Restart / stop / start
+```sh
+sudo systemctl restart magic_lid.service
+sudo systemctl stop magic_lid.service
+sudo systemctl start magic_lid.service
+```
+
+### Export logs to Windows-readable partition
+```sh
+sudo python3 tools/export_logs_to_boot.py
+```
+Copies the latest logs to `/boot/jv_logs/` (or `/boot/firmware/jv_logs/`) so Windows can read them.
+
+### Health check
+```sh
+python3 tools/jvmb_health.py
+```
+Prints service state, journal tail, log tail, Wi-Fi status, internet reachability, and disk free percent.
 
 ## Web UI
 
-The web UI provides large touch-friendly controls for safety, shutdown, and GPIO configuration.
-Binary assets are not stored in this repository, so screenshots are not embedded here. To capture
-one locally, run the web server and use your preferred screenshot tool.
+The web UI provides large touch-friendly controls for safety, shutdown, GPIO configuration, and a log viewer.
+
+### Web log viewer
+
+**Intent:** give headless users a quick way to read persistent logs from the SD card.  
+**Setup:** start `magic_lid_web.service`, then open the web UI and expand the Logs section.  
+**Why this design:** a small API returns only the latest N lines to keep the UI responsive.  
+**Assumptions:** the service user can read `/var/log/julesverne_magicbox/`.
 
 ## Status LED (GPIO12)
 
@@ -105,10 +151,11 @@ one locally, run the web server and use your preferred screenshot tool.
 ### LED meanings
 - 1 Hz blink (0.5s on / 0.5s off) = **Booting**
 - Solid ON = **Ready** (main service is active)
-- 2 blinks = **Service failed**
-- 3 blinks = **Wi-Fi not connected**
-- 4 blinks = **Network OK, no internet**
-- 5 blinks = **Disk low**
+- 2 blinks = **Main service failed**
+- 3 blinks = **Web service failed**
+- 4 blinks = **Wi-Fi not connected**
+- 5 blinks = **Network OK, no internet**
+- 6 blinks = **Disk low**
 
 ### Setup
 1. Install the updated systemd unit:
@@ -127,7 +174,30 @@ one locally, run the web server and use your preferred screenshot tool.
 
 ### Assumptions
 - The main app service is `magic_lid.service`.
+- The web UI service is `magic_lid_web.service`.
 - `iwgetid` is installed (`wireless-tools`) to detect SSID connectivity.
+- Disk warnings appear before network warnings when multiple issues occur.
+
+## Persistent logging & export
+
+**Intent:** store log files on the SD card and make them easy to read on Windows.  
+**Setup:** logs write automatically to `/var/log/julesverne_magicbox/`; run `tools/export_logs_to_boot.py` to copy them to `/boot/jv_logs/` (or `/boot/firmware/jv_logs/`).  
+**Why this design:** log rotation keeps SD card usage bounded while the export step provides a FAT-readable copy.  
+**Assumptions:** the SD card boot partition is mounted at `/boot` or `/boot/firmware`.
+
+## Health check tool
+
+**Intent:** provide a single command that summarizes service state, logs, Wi-Fi, internet reachability, and disk space.  
+**Setup:** run `python3 tools/jvmb_health.py` from the repo checkout.  
+**Why this design:** keeps the health check simple and scriptable without extra dependencies.  
+**Assumptions:** `systemctl` and `journalctl` are available on the target OS.
+
+## GPIO self-test tool
+
+**Intent:** verify LEDs and switches without starting the full GUI.  
+**Setup:** run `python3 tools/gpio_selftest.py` (add `--monitor` to watch inputs for 10 seconds).  
+**Why this design:** a small CLI loop avoids relying on the web UI for hardware testing.  
+**Assumptions:** GPIO wiring matches `src/config.py` and the user has GPIO permissions.
 
 ## Shutdown button (web UI)
 
@@ -213,6 +283,7 @@ This stops and disables both units, removes their unit files, deletes the helper
 - **GPIO permission issues:** ensure the service user is in the `gpio` group (`sudo groups julesvern`). Re-run the installer to fix membership.
 - **Venv problems:** delete `/opt/julesvern/venv` (or your install path) and rerun `sudo ./install.sh`.
 - **Service not starting:** check logs with `journalctl -u magic_lid.service -u magic_lid_web.service -b --no-pager` for stack traces.
+- **GPIO floating inputs:** unconnected switch pins can float and cause phantom presses. Internal pull-ups are enabled in software; add external pull-ups if wiring is long, or disable unused switches in `src/config.py`.
 
 ## Manual run (debugging)
 

@@ -10,13 +10,15 @@ import argparse
 import importlib
 import re
 import subprocess
+from collections import deque
 from pathlib import Path
 from typing import Dict, Optional
 
-from flask import Flask, redirect, render_template, request, url_for
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 from gpiozero import Button
 
 import config
+import logging_utils
 from main import RemoteStateStore
 
 APP_PORT_DEFAULT = 8080
@@ -26,6 +28,13 @@ TEMPLATE_DIR = BASE_DIR / "templates"
 
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
 state_store = RemoteStateStore(config.REMOTE_STATE_FILE)
+logger = logging_utils.get_logger("magicbox.web", config.LOG_FILE_WEB)
+
+LOG_FILE_OPTIONS = {
+    "main": config.LOG_FILE_MAIN,
+    "web": config.LOG_FILE_WEB,
+    "gpio": config.LOG_FILE_GPIO,
+}
 
 PHYSICAL_TO_BCM: Dict[int, Optional[int]] = {
     1: None,
@@ -123,7 +132,7 @@ def read_lid_switch_state() -> Optional[bool]:
         lid_button.close()
         return is_pressed
     except Exception as exc:  # noqa: BLE001 - broad catch keeps UI alive on hardware errors
-        print(f"Warning: unable to read lid switch state ({exc})")
+        logger.warning("Unable to read lid switch state (%s)", exc)
         return None
 
 
@@ -149,6 +158,7 @@ def build_status_payload() -> dict:
             "key1_switch_pin": config.KEY1_SWITCH.physical_pin,
             "key2_switch_pin": config.KEY2_SWITCH.physical_pin,
         },
+        "log_files": list(LOG_FILE_OPTIONS.keys()),
     }
 
 
@@ -236,12 +246,43 @@ def index():
     )
 
 
+def _read_log_tail(path: Path, lines: int) -> str:
+    if lines <= 0:
+        return ""
+    buffer: deque[str] = deque(maxlen=lines)
+    with path.open("r", encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            buffer.append(line.rstrip("\n"))
+    return "\n".join(buffer)
+
+
+@app.get("/api/logs")
+def api_logs():
+    file_key = request.args.get("file", "main").strip().lower()
+    if file_key not in LOG_FILE_OPTIONS:
+        return jsonify({"error": "unknown log file"}), 400
+    try:
+        lines = int(request.args.get("lines", "200"))
+    except ValueError:
+        lines = 200
+    lines = max(1, min(lines, 1000))
+    log_path = LOG_FILE_OPTIONS[file_key]
+    try:
+        payload = _read_log_tail(log_path, lines)
+        missing = False
+    except FileNotFoundError:
+        payload = ""
+        missing = True
+    return jsonify({"file": file_key, "lines": payload, "missing": missing})
+
+
 @app.post("/lid/on")
 def lid_on():
     guard = _safety_redirect("turn the LID LED on")
     if guard:
         return guard
     state_store.write(True)
+    logger.info("LID flag set to ON (web)")
     return redirect(url_for("index", notice="LID flag set to ON"))
 
 
@@ -251,6 +292,7 @@ def lid_off():
     if guard:
         return guard
     state_store.write(False)
+    logger.info("LID flag set to OFF (web)")
     return redirect(url_for("index", notice="LID flag set to OFF"))
 
 
@@ -260,6 +302,7 @@ def lid_toggle():
     if guard:
         return guard
     new_state = state_store.toggle()
+    logger.info("LID flag toggled to %s (web)", "ON" if new_state else "OFF")
     return redirect(
         url_for("index", notice=f"LID flag toggled to {'ON' if new_state else 'OFF'}")
     )
@@ -271,6 +314,7 @@ def magic_toggle():
     if guard:
         return guard
     new_state = state_store.toggle_magic()
+    logger.info("Magic flicker flag toggled to %s (web)", "ON" if new_state else "OFF")
     return redirect(
         url_for("index", notice=f"Magic flag toggled to {'ON' if new_state else 'OFF'}")
     )
@@ -279,6 +323,7 @@ def magic_toggle():
 @app.post("/safety/toggle")
 def safety_toggle():
     new_state = state_store.toggle_safety()
+    logger.info("Safety toggled to %s (web)", "ENABLED" if new_state else "DISABLED")
     if not new_state:
         notice = "Safety disabled: outputs will remain off and controls are locked."
     else:
@@ -315,6 +360,7 @@ def pins_update():
     except Exception as exc:  # noqa: BLE001
         return redirect(url_for("index", alert=f"Failed to update config: {exc}"))
 
+    logger.info("GPIO pins updated via web UI.")
     return redirect(url_for("index", notice="GPIO pins updated in config.py"))
 
 
@@ -323,6 +369,7 @@ def shutdown():
     error = request_shutdown()
     if error:
         return redirect(url_for("index", alert=f"Shutdown failed: {error}"))
+    logger.info("Shutdown requested via web UI.")
     return redirect(url_for("index", notice="Shutdown requested. System will power off shortly."))
 
 
@@ -339,9 +386,11 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    print(
-        f"Starting Magic Lid web UI on http://0.0.0.0:{args.port} — intended for trusted home networks."
+    logger.info(
+        "Starting Magic Lid web UI on http://0.0.0.0:%s — intended for trusted home networks.",
+        args.port,
     )
+    logging_utils.log_startup_banner(logger, "web")
     app.run(host="0.0.0.0", port=args.port)
 
 

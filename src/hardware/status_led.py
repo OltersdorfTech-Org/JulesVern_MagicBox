@@ -17,6 +17,7 @@ class StatusLED:
         "booting",
         "ready",
         "fault_service",
+        "fault_web",
         "fault_wifi",
         "fault_internet",
         "fault_disk",

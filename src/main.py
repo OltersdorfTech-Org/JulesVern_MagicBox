@@ -15,6 +15,7 @@ from typing import Optional
 from gpiozero import Button, LED
 
 import config
+import logging_utils
 
 
 class RemoteStateStore:
@@ -155,10 +156,10 @@ def build_hardware(stop_event: Event):
         bounce_time=config.SWITCH_DEBOUNCE_S,
     )
 
-    lid_led = LED(config.LID_LED.bcm_pin)
-    key1_led = LED(config.KEY1_LED.bcm_pin)
-    key2_led = LED(config.KEY2_LED.bcm_pin)
-    magic_led = LED(config.MAGIC_LED.bcm_pin)
+    lid_led = LED(config.LID_LED.bcm_pin, active_high=config.LID_LED.active_high)
+    key1_led = LED(config.KEY1_LED.bcm_pin, active_high=config.KEY1_LED.active_high)
+    key2_led = LED(config.KEY2_LED.bcm_pin, active_high=config.KEY2_LED.active_high)
+    magic_led = LED(config.MAGIC_LED.bcm_pin, active_high=config.MAGIC_LED.active_high)
 
     flicker_worker = MagicFlickerWorker(magic_led, stop_event)
     flicker_worker.start()
@@ -204,6 +205,8 @@ def update_outputs(hw, remote_lid_on: bool, magic_enabled: bool, safety_enabled:
 
 class ServiceRunner:
     def __init__(self) -> None:
+        self.logger = logging_utils.get_logger("magicbox.main", config.LOG_FILE_MAIN)
+        self._event_rate_limit = RateLimiter(min_interval_s=1.0)
         self.stop_event = Event()
         self.remote_store = RemoteStateStore(config.REMOTE_STATE_FILE)
         self.hardware = build_hardware(self.stop_event)
@@ -213,7 +216,8 @@ class ServiceRunner:
         self.safety_enabled = state["safety_enabled"]
 
     def start(self) -> None:
-        print("Magic Lid service starting...")
+        self.logger.info("Magic Lid service starting...")
+        logging_utils.log_startup_banner(self.logger, "main")
         self._setup_signal_handlers()
         self._attach_switch_handlers()
         update_outputs(
@@ -238,7 +242,8 @@ class ServiceRunner:
         key2_switch.when_released = lambda: self._handle_state_change("Key2 released")
 
     def _handle_state_change(self, message: str) -> None:
-        print(message)
+        if self._event_rate_limit.allow(message):
+            self.logger.debug(message)
         update_outputs(
             self.hardware, self.remote_lid_on, self.magic_enabled, self.safety_enabled
         )
@@ -253,19 +258,19 @@ class ServiceRunner:
             }:
                 if new_state["remote_lid_on"] != self.remote_lid_on:
                     self.remote_lid_on = new_state["remote_lid_on"]
-                    print(
+                    self.logger.info(
                         "Remote LID state updated to: "
                         f"{'ON' if self.remote_lid_on else 'OFF'}"
                     )
                 if new_state["magic_flag_on"] != self.magic_enabled:
                     self.magic_enabled = new_state["magic_flag_on"]
-                    print(
+                    self.logger.info(
                         "Magic flicker flag updated to: "
                         f"{'ON' if self.magic_enabled else 'OFF'}"
                     )
                 if new_state["safety_enabled"] != self.safety_enabled:
                     self.safety_enabled = new_state["safety_enabled"]
-                    print(
+                    self.logger.info(
                         "Safety state updated to: "
                         f"{'ENABLED' if self.safety_enabled else 'DISABLED'}"
                     )
@@ -279,7 +284,7 @@ class ServiceRunner:
         self._cleanup()
 
     def _stop(self, *_args) -> None:
-        print("Received stop signal; cleaning up...")
+        self.logger.info("Received stop signal; cleaning up...")
         self.stop_event.set()
 
     def _cleanup(self) -> None:
@@ -290,7 +295,21 @@ class ServiceRunner:
         for device in self.hardware.values():
             if hasattr(device, "close"):
                 device.close()
-        print("GPIO cleaned up. Exiting.")
+        self.logger.info("GPIO cleaned up. Exiting.")
+
+
+class RateLimiter:
+    def __init__(self, min_interval_s: float) -> None:
+        self.min_interval_s = min_interval_s
+        self._last_seen: dict[str, float] = {}
+
+    def allow(self, key: str) -> bool:
+        now = time.monotonic()
+        last_seen = self._last_seen.get(key, 0.0)
+        if now - last_seen >= self.min_interval_s:
+            self._last_seen[key] = now
+            return True
+        return False
 
 
 def parse_args() -> argparse.Namespace:
@@ -312,18 +331,24 @@ def handle_cli(args: argparse.Namespace, store: RemoteStateStore) -> Optional[bo
     if args.set_lid_remote:
         if args.set_lid_remote == "on":
             store.write(True)
-            print("Remote LID LED state set to ON")
+            logging_utils.get_logger("magicbox.main", config.LOG_FILE_MAIN).info(
+                "Remote LID LED state set to ON"
+            )
         elif args.set_lid_remote == "off":
             store.write(False)
-            print("Remote LID LED state set to OFF")
+            logging_utils.get_logger("magicbox.main", config.LOG_FILE_MAIN).info(
+                "Remote LID LED state set to OFF"
+            )
         elif args.set_lid_remote == "toggle":
             new_state = store.toggle()
-            print(f"Remote LID LED toggled to {'ON' if new_state else 'OFF'}")
+            logging_utils.get_logger("magicbox.main", config.LOG_FILE_MAIN).info(
+                "Remote LID LED toggled to %s", "ON" if new_state else "OFF"
+            )
         return True
 
     if args.print_status:
         state = store.read_all()
-        print(
+        logging_utils.get_logger("magicbox.main", config.LOG_FILE_MAIN).info(
             "Current state: "
             f"Remote LID {'ON' if state['remote_lid_on'] else 'OFF'}, "
             f"Magic {'ON' if state['magic_flag_on'] else 'OFF'}, "

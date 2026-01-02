@@ -1,6 +1,6 @@
 [Unit]
 Description=Magic Lid web UI (Flask)
-After=network-online.target
+After=network-online.target local-fs.target
 Wants=network-online.target
 
 [Service]
@@ -16,6 +16,7 @@ StandardError=journal
 Environment=PYTHONUNBUFFERED=1
 Environment=MAGICBOX_DATA_DIR=/var/lib/julesvern
 Environment=MAGICBOX_STATE_DIR=/var/lib/julesvern/state
+Environment=MAGICBOX_LOG_DIR=/var/log/julesverne_magicbox
 SupplementaryGroups=gpio
 
 [Install]
