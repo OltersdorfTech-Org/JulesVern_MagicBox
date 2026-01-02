@@ -25,7 +25,7 @@ class StatusLED:
 
     def __init__(self, pin: int, log=print) -> None:
         self._log = log
-        self._led = LED(pin)
+        self._led = LED(pin, initial_value=False)
         self._mode = "booting"
         self._mode_lock = threading.Lock()
         self._stop_event = threading.Event()

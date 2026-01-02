@@ -15,6 +15,7 @@ from typing import Optional
 from gpiozero import Button, LED
 
 import config
+import gpio_status
 import logging_utils
 
 
@@ -156,10 +157,26 @@ def build_hardware(stop_event: Event):
         bounce_time=config.SWITCH_DEBOUNCE_S,
     )
 
-    lid_led = LED(config.LID_LED.bcm_pin, active_high=config.LID_LED.active_high)
-    key1_led = LED(config.KEY1_LED.bcm_pin, active_high=config.KEY1_LED.active_high)
-    key2_led = LED(config.KEY2_LED.bcm_pin, active_high=config.KEY2_LED.active_high)
-    magic_led = LED(config.MAGIC_LED.bcm_pin, active_high=config.MAGIC_LED.active_high)
+    lid_led = LED(
+        config.LID_LED.bcm_pin,
+        active_high=config.LID_LED.active_high,
+        initial_value=False,
+    )
+    key1_led = LED(
+        config.KEY1_LED.bcm_pin,
+        active_high=config.KEY1_LED.active_high,
+        initial_value=False,
+    )
+    key2_led = LED(
+        config.KEY2_LED.bcm_pin,
+        active_high=config.KEY2_LED.active_high,
+        initial_value=False,
+    )
+    magic_led = LED(
+        config.MAGIC_LED.bcm_pin,
+        active_high=config.MAGIC_LED.active_high,
+        initial_value=False,
+    )
 
     flicker_worker = MagicFlickerWorker(magic_led, stop_event)
     flicker_worker.start()
@@ -176,15 +193,14 @@ def build_hardware(stop_event: Event):
     }
 
 
-def update_outputs(hw, remote_lid_on: bool, magic_enabled: bool, safety_enabled: bool) -> None:
+def update_outputs(hw, remote_lid_on: bool, magic_enabled: bool, safety_enabled: bool) -> bool:
+    lid_closed = hw["lid_switch"].is_pressed  # active-low switch to GND
     if not safety_enabled:
         hw["lid_led"].off()
         hw["key1_led"].off()
         hw["key2_led"].off()
         hw["flicker"].update(False)
-        return
-
-    lid_closed = hw["lid_switch"].is_pressed  # active-low switch to GND
+        return lid_closed
     key1_closed = hw["key1_switch"].is_pressed
     key2_closed = hw["key2_switch"].is_pressed
 
@@ -201,6 +217,7 @@ def update_outputs(hw, remote_lid_on: bool, magic_enabled: bool, safety_enabled:
     # Magic LED flicker control
     should_flicker = magic_enabled and config.MAGIC_FLICKER_RULE(lid_closed, remote_lid_on)
     hw["flicker"].update(should_flicker)
+    return lid_closed
 
 
 class ServiceRunner:
@@ -209,20 +226,30 @@ class ServiceRunner:
         self._event_rate_limit = RateLimiter(min_interval_s=1.0)
         self.stop_event = Event()
         self.remote_store = RemoteStateStore(config.REMOTE_STATE_FILE)
-        self.hardware = build_hardware(self.stop_event)
+        try:
+            self.hardware = build_hardware(self.stop_event)
+        except Exception as exc:  # noqa: BLE001 - hardware failures should be logged and surfaced
+            self.logger.exception("Failed to initialize GPIO hardware: %s", exc)
+            self._write_status_snapshot(
+                lid_closed=None,
+                last_error=f"GPIO init failed: {exc}",
+            )
+            raise
         state = self.remote_store.read_all()
         self.remote_lid_on = state["remote_lid_on"]
         self.magic_enabled = state["magic_flag_on"]
         self.safety_enabled = state["safety_enabled"]
+        self.last_error: Optional[str] = None
 
     def start(self) -> None:
         self.logger.info("Magic Lid service starting...")
         logging_utils.log_startup_banner(self.logger, "main")
         self._setup_signal_handlers()
         self._attach_switch_handlers()
-        update_outputs(
+        lid_closed = update_outputs(
             self.hardware, self.remote_lid_on, self.magic_enabled, self.safety_enabled
         )
+        self._write_status_snapshot(lid_closed=lid_closed, last_error=None)
         self._run_loop()
 
     def _setup_signal_handlers(self) -> None:
@@ -244,44 +271,55 @@ class ServiceRunner:
     def _handle_state_change(self, message: str) -> None:
         if self._event_rate_limit.allow(message):
             self.logger.debug(message)
-        update_outputs(
+        lid_closed = update_outputs(
             self.hardware, self.remote_lid_on, self.magic_enabled, self.safety_enabled
         )
+        self._write_status_snapshot(lid_closed=lid_closed, last_error=self.last_error)
 
     def _run_loop(self) -> None:
-        while not self.stop_event.is_set():
-            new_state = self.remote_store.read_all()
-            if new_state != {
-                "remote_lid_on": self.remote_lid_on,
-                "magic_flag_on": self.magic_enabled,
-                "safety_enabled": self.safety_enabled,
-            }:
-                if new_state["remote_lid_on"] != self.remote_lid_on:
-                    self.remote_lid_on = new_state["remote_lid_on"]
-                    self.logger.info(
-                        "Remote LID state updated to: "
-                        f"{'ON' if self.remote_lid_on else 'OFF'}"
+        try:
+            while not self.stop_event.is_set():
+                new_state = self.remote_store.read_all()
+                if new_state != {
+                    "remote_lid_on": self.remote_lid_on,
+                    "magic_flag_on": self.magic_enabled,
+                    "safety_enabled": self.safety_enabled,
+                }:
+                    if new_state["remote_lid_on"] != self.remote_lid_on:
+                        self.remote_lid_on = new_state["remote_lid_on"]
+                        self.logger.info(
+                            "Remote LID state updated to: "
+                            f"{'ON' if self.remote_lid_on else 'OFF'}"
+                        )
+                    if new_state["magic_flag_on"] != self.magic_enabled:
+                        self.magic_enabled = new_state["magic_flag_on"]
+                        self.logger.info(
+                            "Magic flicker flag updated to: "
+                            f"{'ON' if self.magic_enabled else 'OFF'}"
+                        )
+                    if new_state["safety_enabled"] != self.safety_enabled:
+                        self.safety_enabled = new_state["safety_enabled"]
+                        self.logger.info(
+                            "Safety state updated to: "
+                            f"{'ENABLED' if self.safety_enabled else 'DISABLED'}"
+                        )
+                    lid_closed = update_outputs(
+                        self.hardware,
+                        self.remote_lid_on,
+                        self.magic_enabled,
+                        self.safety_enabled,
                     )
-                if new_state["magic_flag_on"] != self.magic_enabled:
-                    self.magic_enabled = new_state["magic_flag_on"]
-                    self.logger.info(
-                        "Magic flicker flag updated to: "
-                        f"{'ON' if self.magic_enabled else 'OFF'}"
-                    )
-                if new_state["safety_enabled"] != self.safety_enabled:
-                    self.safety_enabled = new_state["safety_enabled"]
-                    self.logger.info(
-                        "Safety state updated to: "
-                        f"{'ENABLED' if self.safety_enabled else 'DISABLED'}"
-                    )
-                update_outputs(
-                    self.hardware,
-                    self.remote_lid_on,
-                    self.magic_enabled,
-                    self.safety_enabled,
-                )
-            time.sleep(config.MAIN_LOOP_SLEEP_S)
-        self._cleanup()
+                else:
+                    lid_closed = self.hardware["lid_switch"].is_pressed
+                self._write_status_snapshot(lid_closed=lid_closed, last_error=self.last_error)
+                time.sleep(config.MAIN_LOOP_SLEEP_S)
+        except Exception as exc:  # noqa: BLE001 - record crash to status before exiting
+            self.last_error = f"Main loop error: {exc}"
+            self.logger.exception("Unhandled exception in main loop: %s", exc)
+            self._write_status_snapshot(lid_closed=None, last_error=self.last_error)
+            raise
+        finally:
+            self._cleanup()
 
     def _stop(self, *_args) -> None:
         self.logger.info("Received stop signal; cleaning up...")
@@ -296,6 +334,19 @@ class ServiceRunner:
             if hasattr(device, "close"):
                 device.close()
         self.logger.info("GPIO cleaned up. Exiting.")
+
+    def _write_status_snapshot(self, lid_closed: Optional[bool], last_error: Optional[str]) -> None:
+        try:
+            gpio_status.write_status(
+                config.STATUS_FILE,
+                lid_closed=lid_closed,
+                remote_lid_on=self.remote_lid_on,
+                magic_flag_on=self.magic_enabled,
+                safety_enabled=self.safety_enabled,
+                last_error=last_error,
+            )
+        except Exception as exc:  # noqa: BLE001 - avoid crashing on status write
+            self.logger.warning("Failed to write GPIO status snapshot: %s", exc)
 
 
 class RateLimiter:

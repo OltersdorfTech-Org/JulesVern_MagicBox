@@ -8,8 +8,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(BASE_DIR))
 
-import config
-from log_export import default_log_files, export_logs, select_boot_root
+from log_export import build_export_bundle, ensure_writable_export_root, select_boot_root
 
 
 def main() -> int:
@@ -19,18 +18,15 @@ def main() -> int:
         print(f"Error: {exc}")
         return 1
 
-    destination = boot_root / "jv_logs"
-    log_files = default_log_files()
-    copied = export_logs(destination, log_files)
-    if not copied:
-        print(f"No log files found in {config.LOG_DIR}.")
-        print(f"Destination folder created at {destination} (if possible).")
-        return 0
+    export_root, warning = ensure_writable_export_root(boot_root)
+    export_dir = build_export_bundle(export_root)
+    if warning:
+        print(f"Warning: {warning}")
 
-    print("Copied logs:")
-    for path in copied:
-        print(f"- {path}")
-    print(f"Logs exported to {destination}")
+    print("Logs exported.")
+    print(f"Export folder: {export_dir}")
+    print("Copy off the SD card from Windows by opening the boot partition and")
+    print("browsing to the jv_logs/<timestamp>/ folder.")
     return 0
 
 
