@@ -1,6 +1,6 @@
 [Unit]
 Description=Magic Box status LED daemon
-After=network-online.target
+After=network-online.target local-fs.target
 Wants=network-online.target
 
 [Service]
@@ -14,6 +14,7 @@ Group=julesvern
 StandardOutput=journal
 StandardError=journal
 Environment=PYTHONUNBUFFERED=1
+Environment=MAGICBOX_LOG_DIR=/var/log/julesverne_magicbox
 SupplementaryGroups=gpio
 
 [Install]

@@ -147,6 +147,18 @@
             color: var(--text);
             font-size: 1rem;
         }
+        textarea {
+            width: 100%;
+            min-height: 220px;
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: #0b1220;
+            color: var(--text);
+            padding: 12px;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+            font-size: 0.9rem;
+            resize: vertical;
+        }
         .diagram {
             margin-top: 12px;
             padding: 12px;
@@ -156,6 +168,30 @@
             font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
             color: #e5e7eb;
             white-space: pre;
+        }
+        .log-panel {
+            display: none;
+            margin-top: 12px;
+        }
+        .log-panel.active {
+            display: block;
+        }
+        .log-controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .log-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .toggle-button {
+            background: rgba(148,163,184,0.2);
+            color: var(--text);
         }
         footer {
             margin-top: 12px;
@@ -300,9 +336,108 @@
             <div class="diagram">{{ pin_diagram }}</div>
         </div>
 
+        <div class="card">
+            <div class="label-row">
+                <div>
+                    <h3 style="margin: 0;">Logs</h3>
+                    <p class="muted">View the latest lines from persistent log files stored on the SD card.</p>
+                </div>
+                <button class="toggle-button" id="toggle-logs" type="button">Show logs</button>
+            </div>
+            <div class="log-panel" id="logs-panel">
+                <div class="log-controls">
+                    <label>
+                        <span class="muted">Log file</span>
+                        <select id="log-file" style="width: 100%; padding: 10px; border-radius: 10px; background: #0b1220; color: var(--text); border: 1px solid rgba(255,255,255,0.1);">
+                            {% for log_file in log_files %}
+                                <option value="{{ log_file }}">{{ log_file }}.log</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label>
+                        <span class="muted">Lines</span>
+                        <input id="log-lines" type="number" min="10" max="1000" value="200">
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <input id="log-auto" type="checkbox">
+                        <span class="muted">Auto-refresh</span>
+                    </label>
+                    <button class="on" id="refresh-logs" type="button">Refresh logs</button>
+                </div>
+                <div class="log-meta">
+                    <span class="muted" id="log-status">Press refresh to load logs.</span>
+                    <span class="badge" id="log-time"></span>
+                </div>
+                <textarea id="log-output" readonly></textarea>
+            </div>
+        </div>
+
         <footer>
             <p>Safety defaults to OFF. Enable it to use the toggles. The controller service keeps LEDs in sync.</p>
         </footer>
     </div>
+    <script>
+        const toggleButton = document.getElementById('toggle-logs');
+        const logPanel = document.getElementById('logs-panel');
+        const logOutput = document.getElementById('log-output');
+        const logStatus = document.getElementById('log-status');
+        const logTime = document.getElementById('log-time');
+        const logFile = document.getElementById('log-file');
+        const logLines = document.getElementById('log-lines');
+        const logAuto = document.getElementById('log-auto');
+        const refreshButton = document.getElementById('refresh-logs');
+        let autoTimer = null;
+
+        function setStatus(message) {
+            logStatus.textContent = message;
+        }
+
+        async function loadLogs() {
+            const file = logFile.value;
+            const lines = logLines.value || 200;
+            setStatus('Loading logs...');
+            try {
+                const response = await fetch(`/api/logs?file=${encodeURIComponent(file)}&lines=${encodeURIComponent(lines)}`);
+                if (!response.ok) {
+                    throw new Error('Failed to load logs');
+                }
+                const data = await response.json();
+                logOutput.value = data.lines || '';
+                if (data.missing) {
+                    setStatus('Log file not found yet.');
+                } else {
+                    setStatus(`Showing latest ${lines} lines from ${file}.log`);
+                }
+                logTime.textContent = new Date().toLocaleTimeString();
+            } catch (error) {
+                setStatus('Unable to load logs. Check the service.');
+            }
+        }
+
+        function updateAutoRefresh() {
+            if (autoTimer) {
+                clearInterval(autoTimer);
+                autoTimer = null;
+            }
+            if (logAuto.checked) {
+                autoTimer = setInterval(loadLogs, 2000);
+            }
+        }
+
+        toggleButton.addEventListener('click', () => {
+            logPanel.classList.toggle('active');
+            const active = logPanel.classList.contains('active');
+            toggleButton.textContent = active ? 'Hide logs' : 'Show logs';
+            if (active) {
+                loadLogs();
+            } else if (autoTimer) {
+                clearInterval(autoTimer);
+                autoTimer = null;
+            }
+        });
+
+        refreshButton.addEventListener('click', loadLogs);
+        logAuto.addEventListener('change', updateAutoRefresh);
+    </script>
 </body>
 </html>

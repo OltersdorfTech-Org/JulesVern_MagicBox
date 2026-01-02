@@ -107,12 +107,13 @@ write_systemd_unit() {
   local user="$5"
   local data_dir="$6"
   local state_dir="$7"
-  local restart_policy="${8:-on-failure}"
+  local log_dir="$8"
+  local restart_policy="${9:-on-failure}"
 
   cat >"$unit_path" <<EOF_UNIT
 [Unit]
 Description=$description
-After=network-online.target
+After=network-online.target local-fs.target
 Wants=network-online.target
 
 [Service]
@@ -127,7 +128,10 @@ TimeoutStopSec=15
 Environment=PYTHONUNBUFFERED=1
 Environment=MAGICBOX_DATA_DIR=$data_dir
 Environment=MAGICBOX_STATE_DIR=$state_dir
+Environment=MAGICBOX_LOG_DIR=$log_dir
 SupplementaryGroups=gpio
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -160,6 +164,7 @@ install_services() {
   local web_port="$5"
   local data_dir="$6"
   local state_dir="$7"
+  local log_dir="$8"
 
   write_systemd_unit \
     "$systemd_dir/magic_lid.service" \
@@ -168,7 +173,8 @@ install_services() {
     "$repo_dir" \
     "$user" \
     "$data_dir" \
-    "$state_dir"
+    "$state_dir" \
+    "$log_dir"
 
   write_systemd_unit \
     "$systemd_dir/magic_lid_web.service" \
@@ -177,7 +183,8 @@ install_services() {
     "$repo_dir" \
     "$user" \
     "$data_dir" \
-    "$state_dir"
+    "$state_dir" \
+    "$log_dir"
 
   write_systemd_unit \
     "$systemd_dir/jv-status-led.service" \
@@ -187,6 +194,7 @@ install_services() {
     "$user" \
     "$data_dir" \
     "$state_dir" \
+    "$log_dir" \
     "always"
 
   write_poweroff_unit "$systemd_dir/jv-poweroff.service"
@@ -305,6 +313,7 @@ persist_config() {
   local user="$4"
   local web_port="$5"
   local data_dir="$6"
+  local log_dir="$7"
   mkdir -p "$(dirname "$config_file")"
   cat >"$config_file" <<EOF_CFG
 REPO_DIR="$repo_dir"
@@ -312,6 +321,7 @@ VENV_DIR="$venv_dir"
 SERVICE_USER="$user"
 WEB_PORT="$web_port"
 DATA_DIR="$data_dir"
+LOG_DIR="$log_dir"
 EOF_CFG
   log "Saved config to $config_file"
 }
@@ -366,6 +376,7 @@ main() {
   SERVICE_HOME=${MAGICBOX_USER_HOME:-/var/lib/julesvern}
   DATA_DIR=${MAGICBOX_DATA_DIR:-/var/lib/julesvern}
   STATE_DIR="$DATA_DIR/state"
+  LOG_DIR=${MAGICBOX_LOG_DIR:-/var/log/julesverne_magicbox}
   INSTALL_ROOT_DEFAULT="/opt/julesvern"
   TARGET_REPO=${MAGICBOX_TARGET:-$INSTALL_ROOT_DEFAULT}
   WEB_PORT=${MAGICBOX_WEB_PORT:-8080}
@@ -390,17 +401,19 @@ main() {
   log "Service will run as user: $SERVICE_USER"
   log "Web UI port: $WEB_PORT"
   log "Data directory: $DATA_DIR"
+  log "Log directory: $LOG_DIR"
 
   install_apt_packages
-  mkdir -p "$DATA_DIR" "$STATE_DIR"
+  mkdir -p "$DATA_DIR" "$STATE_DIR" "$LOG_DIR"
   chown -R "$SERVICE_USER":"$SERVICE_USER" "$DATA_DIR"
+  chown -R "$SERVICE_USER":"$SERVICE_USER" "$LOG_DIR"
 
   create_venv "$PYTHON_BIN" "$VENV_DIR"
   chown -R "$SERVICE_USER":"$SERVICE_USER" "$REPO_DIR"
 
-  install_services "$SYSTEMD_DIR" "$VENV_DIR" "$REPO_DIR" "$SERVICE_USER" "$WEB_PORT" "$DATA_DIR" "$STATE_DIR"
+  install_services "$SYSTEMD_DIR" "$VENV_DIR" "$REPO_DIR" "$SERVICE_USER" "$WEB_PORT" "$DATA_DIR" "$STATE_DIR" "$LOG_DIR"
   install_helper_command "$HELPER_PATH" "$CONFIG_FILE"
-  persist_config "$CONFIG_FILE" "$REPO_DIR" "$VENV_DIR" "$SERVICE_USER" "$WEB_PORT" "$DATA_DIR"
+  persist_config "$CONFIG_FILE" "$REPO_DIR" "$VENV_DIR" "$SERVICE_USER" "$WEB_PORT" "$DATA_DIR" "$LOG_DIR"
   create_desktop_launcher "$LAUNCHER_USER" "$WEB_PORT" "$DESKTOP_PATH"
   start_services
 

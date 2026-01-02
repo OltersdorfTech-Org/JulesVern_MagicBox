@@ -6,28 +6,44 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import time
-from threading import Thread
 from pathlib import Path
+from threading import Thread
 from typing import Iterable, Optional, Tuple
 
+BASE_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BASE_DIR))
+
+import config
+import logging_utils
 from status_led import StatusLED
 
 GPIO_PIN = 12
-DISK_FREE_THRESHOLD_PERCENT = 5.0
 INTERNET_CHECK_TARGETS: Iterable[Tuple[str, int]] = (
     ("1.1.1.1", 443),
     ("8.8.8.8", 53),
 )
 INTERNET_TIMEOUT_S = 2.0
 MAIN_SERVICE_NAME = "magic_lid.service"
+WEB_SERVICE_NAME = "magic_lid_web.service"
 CHECK_INTERVAL_S = 2.0
 WLAN_INTERFACE = "wlan0"
 
 PATTERNS = {
     "booting": [(True, 0.5), (False, 0.5)],
     "fault_service": [(True, 0.15), (False, 0.15), (True, 0.15), (False, 1.2)],
+    "fault_web": [
+        (True, 0.15),
+        (False, 0.15),
+        (True, 0.15),
+        (False, 0.15),
+        (True, 0.15),
+        (False, 1.2),
+    ],
     "fault_wifi": [
+        (True, 0.15),
+        (False, 0.15),
         (True, 0.15),
         (False, 0.15),
         (True, 0.15),
@@ -36,6 +52,8 @@ PATTERNS = {
         (False, 1.2),
     ],
     "fault_internet": [
+        (True, 0.15),
+        (False, 0.15),
         (True, 0.15),
         (False, 0.15),
         (True, 0.15),
@@ -55,13 +73,13 @@ PATTERNS = {
         (True, 0.15),
         (False, 0.15),
         (True, 0.15),
+        (False, 0.15),
+        (True, 0.15),
         (False, 1.2),
     ],
 }
 
-
-def log(message: str) -> None:
-    print(f"[status-led] {message}")
+logger = logging_utils.get_logger("magicbox.status_led", config.LOG_FILE_GPIO)
 
 
 def _command_output(command: list[str], timeout: float = 2.0) -> Optional[str]:
@@ -74,15 +92,15 @@ def _command_output(command: list[str], timeout: float = 2.0) -> Optional[str]:
             timeout=timeout,
         )
     except FileNotFoundError:
-        log(f"Command not found: {' '.join(command)}")
+        logger.warning("Command not found: %s", " ".join(command))
         return None
     except subprocess.TimeoutExpired:
-        log(f"Command timed out: {' '.join(command)}")
+        logger.warning("Command timed out: %s", " ".join(command))
         return None
     if result.returncode != 0:
         stderr = result.stderr.strip()
         if stderr:
-            log(f"Command failed ({' '.join(command)}): {stderr}")
+            logger.warning("Command failed (%s): %s", " ".join(command), stderr)
         return None
     return result.stdout.strip()
 
@@ -100,9 +118,15 @@ def _wifi_has_ipv4() -> bool:
 
 def _wifi_ssid() -> Optional[str]:
     output = _command_output(["iwgetid", "-r"])
+    if output:
+        return output
+    output = _command_output(["nmcli", "-t", "-f", "ACTIVE,SSID", "dev", "wifi"])
     if not output:
         return None
-    return output
+    for line in output.splitlines():
+        if line.startswith("yes:"):
+            return line.split("yes:", 1)[1]
+    return None
 
 
 def wifi_connected() -> bool:
@@ -127,45 +151,61 @@ def internet_available() -> bool:
 def disk_low() -> bool:
     usage = shutil.disk_usage("/")
     free_percent = (usage.free / usage.total) * 100
-    return free_percent < DISK_FREE_THRESHOLD_PERCENT
+    free_gb = usage.free / (1024 ** 3)
+    return (
+        free_percent < config.DISK_FREE_THRESHOLD_PERCENT
+        or free_gb < config.DISK_FREE_THRESHOLD_GB
+    )
 
 
-def service_state() -> str:
-    output = _command_output(["systemctl", "is-active", MAIN_SERVICE_NAME], timeout=2.0)
+def service_state(service_name: str) -> str:
+    output = _command_output(["systemctl", "is-active", service_name], timeout=2.0)
     return output or "unknown"
 
 
-def select_led_mode() -> str:
-    if disk_low():
-        return "fault_disk"
-
-    state = service_state()
-    if state not in ("active", "activating"):
+def decide_mode(
+    main_state: str,
+    web_state: str,
+    wifi_ok: bool,
+    internet_ok: bool,
+    disk_ok: bool,
+) -> str:
+    if main_state not in ("active", "activating"):
         return "fault_service"
-
-    wifi_ok = wifi_connected()
+    if web_state not in ("active", "activating"):
+        return "fault_web"
+    if not disk_ok:
+        return "fault_disk"
     if not wifi_ok:
         return "fault_wifi"
-
-    if not internet_available():
+    if not internet_ok:
         return "fault_internet"
-
-    if state == "active":
+    if main_state == "active":
         return "ready"
     return "booting"
 
 
+def select_led_mode() -> str:
+    main_state = service_state(MAIN_SERVICE_NAME)
+    web_state = service_state(WEB_SERVICE_NAME)
+    wifi_ok = wifi_connected()
+    internet_ok = internet_available()
+    disk_ok = not disk_low()
+    return decide_mode(main_state, web_state, wifi_ok, internet_ok, disk_ok)
+
+
 def main() -> None:
-    led = StatusLED(GPIO_PIN, log=log)
+    led = StatusLED(GPIO_PIN, log=logger.info)
 
     def _handle_signal(_signum, _frame):
-        log("Received stop signal; shutting down.")
+        logger.info("Received stop signal; shutting down.")
         led.stop()
 
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
-    log("Status LED daemon starting.")
+    logger.info("Status LED daemon starting.")
+    logging_utils.log_startup_banner(logger, "status_led")
     led.set_mode("booting")
 
     led_thread = Thread(target=led.run, args=(PATTERNS,), daemon=True)
@@ -177,12 +217,12 @@ def main() -> None:
                 mode = select_led_mode()
                 led.set_mode(mode)
             except Exception as exc:  # noqa: BLE001 - log and continue to avoid silent failures
-                log(f"Error while evaluating LED state: {exc}")
+                logger.exception("Error while evaluating LED state: %s", exc)
             time.sleep(CHECK_INTERVAL_S)
     finally:
         led.stop()
         led_thread.join(timeout=2.0)
-        log("Status LED daemon exiting.")
+        logger.info("Status LED daemon exiting.")
 
 
 if __name__ == "__main__":
