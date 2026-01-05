@@ -10,15 +10,15 @@ import argparse
 import importlib
 import re
 import subprocess
+import time
 from collections import deque
 from pathlib import Path
 from typing import Dict, Optional
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
-from gpiozero import Button
-
 import config
 import logging_utils
+from gpio_status import read_status
 from main import RemoteStateStore
 
 APP_PORT_DEFAULT = 8080
@@ -115,25 +115,25 @@ Raspberry Pi 40-pin header (physical numbers)
 """
 
 
-def read_lid_switch_state() -> Optional[bool]:
-    """Read the lid switch state if available.
+def read_lid_switch_state() -> tuple[Optional[bool], Optional[str]]:
+    """Read lid state from the GPIO service snapshot.
 
-    Returns True when the lid is closed (switch pressed), False when open, and
-    None if the state cannot be determined (e.g., missing hardware).
+    Returns (lid_closed, error_message).
     """
 
-    try:
-        lid_button = Button(
-            config.LID_SWITCH.bcm_pin,
-            pull_up=config.SWITCH_PULL_UP,
-            bounce_time=config.SWITCH_DEBOUNCE_S,
-        )
-        is_pressed = lid_button.is_pressed
-        lid_button.close()
-        return is_pressed
-    except Exception as exc:  # noqa: BLE001 - broad catch keeps UI alive on hardware errors
-        logger.warning("Unable to read lid switch state (%s)", exc)
-        return None
+    status = read_status(config.STATUS_FILE)
+    if status is None:
+        return None, "GPIO service status file not found."
+    if status.updated_at_unix:
+        age_s = time.time() - status.updated_at_unix
+    else:
+        age_s = config.STATUS_STALE_SECONDS + 1
+    if age_s > config.STATUS_STALE_SECONDS:
+        last_error = status.last_error or "Status heartbeat is stale."
+        return None, f"GPIO service down: {last_error}"
+    if status.last_error:
+        return status.lid_closed, f"GPIO service error: {status.last_error}"
+    return status.lid_closed, None
 
 
 def build_status_payload() -> dict:
@@ -143,12 +143,13 @@ def build_status_payload() -> dict:
     remote_on = state["remote_lid_on"]
     magic_on = state["magic_flag_on"]
     safety_on = state["safety_enabled"]
-    lid_closed = read_lid_switch_state()
+    lid_closed, lid_error = read_lid_switch_state()
     return {
         "remote_on": remote_on,
         "magic_on": magic_on,
         "safety_on": safety_on,
         "lid_closed": lid_closed,
+        "lid_error": lid_error,
         "pins": {
             "lid_switch_pin": config.LID_SWITCH.physical_pin,
             "lid_led_pin": config.LID_LED.physical_pin,

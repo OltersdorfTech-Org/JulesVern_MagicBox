@@ -169,23 +169,23 @@ def decide_mode(
     wifi_ok: bool,
     internet_ok: bool,
     disk_ok: bool,
-) -> str:
+) -> tuple[str, str]:
     if main_state not in ("active", "activating"):
-        return "fault_service"
+        return "fault_service", f"{MAIN_SERVICE_NAME} state={main_state}"
     if web_state not in ("active", "activating"):
-        return "fault_web"
+        return "fault_web", f"{WEB_SERVICE_NAME} state={web_state}"
     if not disk_ok:
-        return "fault_disk"
+        return "fault_disk", "Disk free below threshold"
     if not wifi_ok:
-        return "fault_wifi"
+        return "fault_wifi", "Wi-Fi disconnected"
     if not internet_ok:
-        return "fault_internet"
+        return "fault_internet", "Internet unreachable"
     if main_state == "active":
-        return "ready"
-    return "booting"
+        return "ready", "Main service active"
+    return "booting", "Main service activating"
 
 
-def select_led_mode() -> str:
+def select_led_mode() -> tuple[str, str]:
     main_state = service_state(MAIN_SERVICE_NAME)
     web_state = service_state(WEB_SERVICE_NAME)
     wifi_ok = wifi_connected()
@@ -212,10 +212,17 @@ def main() -> None:
     led_thread.start()
 
     try:
+        last_mode = None
         while not led.stopped():
             try:
-                mode = select_led_mode()
+                mode, reason = select_led_mode()
                 led.set_mode(mode)
+                if mode != last_mode:
+                    if mode.startswith("fault"):
+                        logger.error("Status LED fault: %s", reason)
+                    else:
+                        logger.info("Status LED mode reason: %s", reason)
+                    last_mode = mode
             except Exception as exc:  # noqa: BLE001 - log and continue to avoid silent failures
                 logger.exception("Error while evaluating LED state: %s", exc)
             time.sleep(CHECK_INTERVAL_S)

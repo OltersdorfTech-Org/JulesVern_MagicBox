@@ -5,7 +5,7 @@ Notes from user clarifications:
 - All pin references are physical header pins; BCM mappings are provided below.
 - Switches are wired from GPIO to GND with no external pull-ups (uses internal
   pull_up=True in software).
-- Lid switch confirmed on BCM13 (physical pin 33).
+- Lid switch confirmed on BCM27 (physical pin 13).
 - Key 2 switch/LED must move to their own GPIO pins; defaults below pick free
   GPIOs but can be changed easily.
 """
@@ -20,6 +20,8 @@ DATA_DIR = Path(os.environ.get("MAGICBOX_DATA_DIR", BASE_DIR / "data"))
 STATE_DIR = Path(os.environ.get("MAGICBOX_STATE_DIR", DATA_DIR / "state"))
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 REMOTE_STATE_FILE = STATE_DIR / "lid_remote_state.json"
+STATUS_FILE = STATE_DIR / "gpio_status.json"
+STATUS_STALE_SECONDS = float(os.environ.get("MAGICBOX_STATUS_STALE_SECONDS", "5"))
 
 # Logging configuration
 LOG_DIR = Path(os.environ.get("MAGICBOX_LOG_DIR", "/var/log/julesverne_magicbox"))
@@ -47,11 +49,11 @@ class SignalPin:
 # Pin defaults — adjust if your wiring differs
 LID_SWITCH = SignalPin(
     name="LID_SWITCH",
-    bcm_pin=13,
-    physical_pin=33,
-    needs_confirmation=False,
+    bcm_pin=27,
+    physical_pin=13,
+    needs_confirmation=True,
     active_high=True,
-    note="Confirmed by user: Lid switch on BCM13 (physical pin 33).",
+    note="Updated wiring: lid switch on BCM27 (physical pin 13).",
 )
 
 KEY1_SWITCH = SignalPin(
@@ -110,7 +112,7 @@ MAGIC_LED = SignalPin(
 
 # Switch settings
 SWITCH_PULL_UP = True  # Active-low expected: switches to GND
-SWITCH_DEBOUNCE_S = 0.1
+SWITCH_DEBOUNCE_S = 0.05
 
 # App metadata
 APP_VERSION = os.environ.get("MAGICBOX_VERSION", "0.1.0")

@@ -212,6 +212,7 @@ DEFAULT_REPO_DIR="/opt/julesvern"
 DEFAULT_VENV_DIR="$DEFAULT_REPO_DIR/venv"
 DEFAULT_USER="julesvern"
 DEFAULT_DATA_DIR="/var/lib/julesvern"
+DEFAULT_LOG_DIR="/var/log/julesverne_magicbox"
 SERVICES=(magic_lid.service magic_lid_web.service jv-status-led.service)
 
 if [ -f "$CONFIG_FILE" ]; then
@@ -223,6 +224,7 @@ REPO_DIR="${REPO_DIR:-$DEFAULT_REPO_DIR}"
 VENV_DIR="${VENV_DIR:-$DEFAULT_VENV_DIR}"
 SERVICE_USER="${SERVICE_USER:-$DEFAULT_USER}"
 DATA_DIR="${DATA_DIR:-$DEFAULT_DATA_DIR}"
+LOG_DIR="${LOG_DIR:-$DEFAULT_LOG_DIR}"
 WEB_PORT="${WEB_PORT:-8080}"
 
 usage() {
@@ -237,6 +239,7 @@ magicbox logs-main       # follow GPIO service logs
 magicbox logs-web        # follow web service logs
 magicbox logs-led        # follow status LED logs
 magicbox open            # open the web UI in a browser on this machine
+magicbox export-logs     # export logs to the boot partition
 USAGE
 }
 
@@ -294,6 +297,18 @@ case "$cmd" in
     ;;
   open)
     open_url
+    ;;
+  export-logs)
+    require_repo
+    python_bin="$VENV_DIR/bin/python"
+    if [ ! -x "$python_bin" ]; then
+      python_bin="python3"
+    fi
+    if [ "$(id -u)" -ne 0 ]; then
+      exec sudo MAGICBOX_DATA_DIR="$DATA_DIR" MAGICBOX_LOG_DIR="$LOG_DIR" "$python_bin" "$REPO_DIR/tools/export_logs_to_boot.py"
+    else
+      exec MAGICBOX_DATA_DIR="$DATA_DIR" MAGICBOX_LOG_DIR="$LOG_DIR" "$python_bin" "$REPO_DIR/tools/export_logs_to_boot.py"
+    fi
     ;;
   *)
     usage
@@ -407,6 +422,13 @@ main() {
   mkdir -p "$DATA_DIR" "$STATE_DIR" "$LOG_DIR"
   chown -R "$SERVICE_USER":"$SERVICE_USER" "$DATA_DIR"
   chown -R "$SERVICE_USER":"$SERVICE_USER" "$LOG_DIR"
+  chmod -R 775 "$DATA_DIR" "$STATE_DIR" "$LOG_DIR"
+  if [ -d /boot/firmware ]; then
+    mkdir -p /boot/firmware/jv_logs || true
+  fi
+  if [ -d /boot ]; then
+    mkdir -p /boot/jv_logs || true
+  fi
 
   create_venv "$PYTHON_BIN" "$VENV_DIR"
   chown -R "$SERVICE_USER":"$SERVICE_USER" "$REPO_DIR"

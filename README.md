@@ -13,7 +13,7 @@ Headless-ready Raspberry Pi project that watches three switches (lid + two keys)
 
 | Signal       | Purpose                          | BCM GPIO | Physical Pin | Status |
 |--------------|----------------------------------|----------|--------------|--------|
-| LID_SWITCH   | Active-low switch to GND         | 13       | 33           | Confirmed by user |
+| LID_SWITCH   | Active-low switch to GND         | 27       | 13           | Pi Zero 2 W wiring |
 | KEY1_SWITCH  | Active-low switch to GND         | 23       | 16           | Please confirm |
 | KEY2_SWITCH  | Active-low switch to GND         | 5        | 29           | Moved to its own GPIO (update if wired differently) |
 | LID_LED      | LED w/ resistor to GND           | 4        | 7            | Please confirm |
@@ -84,7 +84,7 @@ sudo ./install.sh
 
 - **Autostart on boot:** both services start headlessly after networking is ready; no login or GUI needed.
 - **Web UI:** available at `http://<pi-ip>:8080` by default (override during install with `MAGICBOX_WEB_PORT=<port>`).
-- **Data & config:** remote state lives at `/var/lib/julesvern/state/lid_remote_state.json`. Pin mappings and other tunables remain in `src/config.py` within `/opt/julesvern` (or your chosen install path).
+- **Data & config:** remote state lives at `/var/lib/julesvern/state/lid_remote_state.json`. GPIO status snapshots are written to `/var/lib/julesvern/state/gpio_status.json` (stale threshold via `MAGICBOX_STATUS_STALE_SECONDS`). Pin mappings and other tunables remain in `src/config.py` within `/opt/julesvern` (or your chosen install path).
 - **Logging:** persistent logs are written to `/var/log/julesverne_magicbox/` and also stream to journald.
 - **Restart policy:** `Restart=on-failure` with a 2s backoff on both units.
 
@@ -181,7 +181,7 @@ The web UI provides large touch-friendly controls for safety, shutdown, GPIO con
 ## Persistent logging & export
 
 **Intent:** store log files on the SD card and make them easy to read on Windows.  
-**Setup:** logs write automatically to `/var/log/julesverne_magicbox/`; run `tools/export_logs_to_boot.py` to copy them to `/boot/jv_logs/` (or `/boot/firmware/jv_logs/`).  
+**Setup:** logs write automatically to `/var/log/julesverne_magicbox/`; run `magicbox export-logs` (or `python3 tools/export_logs_to_boot.py`) to copy them to `/boot/jv_logs/` (or `/boot/firmware/jv_logs/`).  
 **Why this design:** log rotation keeps SD card usage bounded while the export step provides a FAT-readable copy.  
 **Assumptions:** the SD card boot partition is mounted at `/boot` or `/boot/firmware`.
 
@@ -239,6 +239,7 @@ magicbox logs-web      # web service logs
 magicbox restart       # restart both
 magicbox stop|start    # stop/start both
 magicbox open          # open http://localhost:<port> on this machine
+magicbox export-logs   # export logs to the boot partition for Windows access
 ```
 
 Direct systemd equivalents:

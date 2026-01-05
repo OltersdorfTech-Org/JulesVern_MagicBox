@@ -99,6 +99,7 @@
         .pill.on { background: rgba(16,185,129,0.15); color: #bbf7d0; }
         .pill.off { background: rgba(239,68,68,0.2); color: #fecdd3; }
         .pill.unknown { background: rgba(255,255,255,0.08); color: #e5e7eb; }
+        .pill.error { background: rgba(248,113,113,0.2); color: #fecaca; }
         .indicator {
             font-weight: 800;
             padding: 4px 10px;
@@ -276,7 +277,9 @@
             <div class="status">
                 <div>
                     <label>Lid Switch</label>
-                    {% if lid_closed is none %}
+                    {% if lid_error %}
+                        <span class="pill error">{{ lid_error }}</span>
+                    {% elif lid_closed is none %}
                         <span class="pill unknown">Unknown</span>
                     {% elif lid_closed %}
                         <span class="pill on">CLOSED</span>

@@ -8,7 +8,7 @@ import status_led_daemon as daemon
 
 
 def test_decide_mode_prioritizes_service_failure():
-    mode = daemon.decide_mode(
+    mode, reason = daemon.decide_mode(
         main_state="failed",
         web_state="active",
         wifi_ok=True,
@@ -16,10 +16,11 @@ def test_decide_mode_prioritizes_service_failure():
         disk_ok=True,
     )
     assert mode == "fault_service"
+    assert "magic_lid.service" in reason
 
 
 def test_decide_mode_reports_web_failure_when_main_ok():
-    mode = daemon.decide_mode(
+    mode, reason = daemon.decide_mode(
         main_state="active",
         web_state="inactive",
         wifi_ok=True,
@@ -27,10 +28,11 @@ def test_decide_mode_reports_web_failure_when_main_ok():
         disk_ok=True,
     )
     assert mode == "fault_web"
+    assert "magic_lid_web.service" in reason
 
 
 def test_decide_mode_reports_disk_before_network():
-    mode = daemon.decide_mode(
+    mode, reason = daemon.decide_mode(
         main_state="active",
         web_state="active",
         wifi_ok=False,
@@ -38,3 +40,4 @@ def test_decide_mode_reports_disk_before_network():
         disk_ok=False,
     )
     assert mode == "fault_disk"
+    assert "Disk free" in reason

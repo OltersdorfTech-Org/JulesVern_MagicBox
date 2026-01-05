@@ -36,6 +36,7 @@ magicbox stop     # stop the GPIO service
 magicbox restart  # restart the GPIO service
 magicbox logs     # follow logs
 magicbox install  # re-run the installer with the saved path/user
+magicbox export-logs  # export logs to boot partition for Windows access
 ```
 
 ## Systemd details
