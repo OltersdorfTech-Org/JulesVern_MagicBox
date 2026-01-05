@@ -31,11 +31,12 @@ purge_repo() {
   fi
 }
 
-purge_data() {
-  local data_dir="$1"
-  if [ -d "$data_dir" ]; then
-    rm -rf "$data_dir"
-    log "Deleted data directory at $data_dir"
+purge_path() {
+  local target="$1"
+  local label="$2"
+  if [ -d "$target" ]; then
+    rm -rf "$target"
+    log "Deleted $label at $target"
   fi
 }
 
@@ -47,7 +48,8 @@ main() {
   CONFIG_DIR="/etc/julesverne_magicbox"
   CONFIG_FILE="$CONFIG_DIR/runtime.conf"
   DEFAULT_REPO_DIR="/opt/julesvern/JulesVern_MagicBox"
-  DEFAULT_DATA_DIR="/var/lib/julesverne_magicbox"
+  DEFAULT_STATE_DIR="/var/lib/julesverne_magicbox"
+  DEFAULT_LOG_DIR="/var/log/julesverne_magicbox"
 
   # Load saved config if present
   if [ -f "$CONFIG_FILE" ]; then
@@ -56,7 +58,8 @@ main() {
   fi
 
   REPO_DIR=${JV_REPO_DIR:-$DEFAULT_REPO_DIR}
-  DATA_DIR=${MAGICBOX_DATA_DIR:-$DEFAULT_DATA_DIR}
+  STATE_DIR=${MAGICBOX_STATE_DIR:-$DEFAULT_STATE_DIR}
+  LOG_DIR=${MAGICBOX_LOG_DIR:-$DEFAULT_LOG_DIR}
 
   log "Stopping and removing systemd units"
   remove_service "magic_lid.service" "$SYSTEMD_DIR"
@@ -87,10 +90,16 @@ main() {
     log "Leaving repository at $REPO_DIR (set PURGE_REPO=1 to delete)"
   fi
 
-  if [ "${PURGE_DATA:-0}" -eq 1 ]; then
-    purge_data "$DATA_DIR"
+  if [ "${PURGE_STATE:-0}" -eq 1 ]; then
+    purge_path "$STATE_DIR" "state directory"
   else
-    log "Leaving data directory at $DATA_DIR (set PURGE_DATA=1 to delete)"
+    log "Leaving state directory at $STATE_DIR (set PURGE_STATE=1 to delete)"
+  fi
+
+  if [ "${PURGE_LOGS:-0}" -eq 1 ]; then
+    purge_path "$LOG_DIR" "log directory"
+  else
+    log "Leaving log directory at $LOG_DIR (set PURGE_LOGS=1 to delete)"
   fi
 
   log "Uninstall complete"

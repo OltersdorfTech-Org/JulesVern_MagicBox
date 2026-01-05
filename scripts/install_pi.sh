@@ -85,7 +85,7 @@ resolve_runtime_user() {
 ensure_user_groups() {
   local user="$1"
   local group
-  for group in gpio adm systemd-journal; do
+  for group in gpio adm; do
     if getent group "$group" >/dev/null 2>&1; then
       usermod -a -G "$group" "$user"
     fi
@@ -107,17 +107,11 @@ write_runtime_conf() {
   local repo_dir="$2"
   local user="$3"
   local web_port="$4"
-  local data_dir="$5"
-  local state_dir="$6"
-  local log_dir="$7"
 
   mkdir -p "$(dirname "$conf_path")"
   cat >"$conf_path" <<EOF_CONF
 JV_USER="$user"
 JV_REPO_DIR="$repo_dir"
-MAGICBOX_DATA_DIR="$data_dir"
-MAGICBOX_STATE_DIR="$state_dir"
-MAGICBOX_LOG_DIR="$log_dir"
 MAGICBOX_WEB_PORT="$web_port"
 EOF_CONF
   log "Saved runtime config to $conf_path"
@@ -242,8 +236,6 @@ if [ -f "$CONFIG_FILE" ]; then
 fi
 
 REPO_DIR="${JV_REPO_DIR:-/opt/julesvern/JulesVern_MagicBox}"
-LOG_DIR="${MAGICBOX_LOG_DIR:-/var/log/julesverne_magicbox}"
-DATA_DIR="${MAGICBOX_DATA_DIR:-/var/lib/julesverne_magicbox}"
 WEB_PORT="${MAGICBOX_WEB_PORT:-8080}"
 
 usage() {
@@ -320,9 +312,9 @@ case "$cmd" in
   export-logs)
     require_repo
     if [ "$(id -u)" -ne 0 ]; then
-      exec sudo MAGICBOX_DATA_DIR="$DATA_DIR" MAGICBOX_LOG_DIR="$LOG_DIR" /usr/bin/python3 "$REPO_DIR/tools/export_logs_to_boot.py"
+      exec sudo /usr/bin/python3 "$REPO_DIR/tools/export_logs_to_boot.py"
     else
-      exec MAGICBOX_DATA_DIR="$DATA_DIR" MAGICBOX_LOG_DIR="$LOG_DIR" /usr/bin/python3 "$REPO_DIR/tools/export_logs_to_boot.py"
+      exec /usr/bin/python3 "$REPO_DIR/tools/export_logs_to_boot.py"
     fi
     ;;
   *)
@@ -383,9 +375,8 @@ main() {
   HELPER_PATH="/usr/local/bin/magicbox"
   RUNTIME_CONF="/etc/julesverne_magicbox/runtime.conf"
   SERVICE_USER=$(resolve_runtime_user)
-  DATA_DIR=${MAGICBOX_DATA_DIR:-/var/lib/julesverne_magicbox}
-  STATE_DIR="${MAGICBOX_STATE_DIR:-$DATA_DIR/state}"
-  LOG_DIR=${MAGICBOX_LOG_DIR:-/var/log/julesverne_magicbox}
+  STATE_DIR="/var/lib/julesverne_magicbox"
+  LOG_DIR="/var/log/julesverne_magicbox"
   INSTALL_ROOT_DEFAULT="/opt/julesvern/JulesVern_MagicBox"
   TARGET_REPO=${MAGICBOX_TARGET:-$INSTALL_ROOT_DEFAULT}
   WEB_PORT=${MAGICBOX_WEB_PORT:-8080}
@@ -408,29 +399,37 @@ main() {
 
   log "Using repository at $REPO_DIR"
   log "Web UI port: $WEB_PORT"
-  log "Data directory: $DATA_DIR"
+  log "State directory: $STATE_DIR"
   log "Log directory: $LOG_DIR"
 
   install_apt_packages
-
-  mkdir -p "$DATA_DIR" "$STATE_DIR" "$LOG_DIR"
-  if getent group adm >/dev/null 2>&1; then
-    chown -R "$SERVICE_USER":adm "$DATA_DIR" "$LOG_DIR"
-    chmod -R 775 "$DATA_DIR" "$STATE_DIR" "$LOG_DIR"
-  else
-    chown -R "$SERVICE_USER":"$SERVICE_USER" "$DATA_DIR" "$LOG_DIR"
-    chmod -R 775 "$DATA_DIR" "$STATE_DIR" "$LOG_DIR"
+  if ! /usr/bin/python3 --version; then
+    echo "Unable to run /usr/bin/python3. Ensure Python 3 is installed." >&2
+    exit 1
   fi
+
+  if ! getent group adm >/dev/null 2>&1; then
+    echo "Required group 'adm' is missing; cannot set log permissions." >&2
+    exit 1
+  fi
+
+  mkdir -p "$STATE_DIR" "$LOG_DIR"
+  chown -R "$SERVICE_USER":adm "$STATE_DIR" "$LOG_DIR"
+  chmod -R 775 "$STATE_DIR" "$LOG_DIR"
 
   chown -R "$SERVICE_USER":"$SERVICE_USER" "$REPO_DIR"
 
-  write_runtime_conf "$RUNTIME_CONF" "$REPO_DIR" "$SERVICE_USER" "$WEB_PORT" "$DATA_DIR" "$STATE_DIR" "$LOG_DIR"
+  write_runtime_conf "$RUNTIME_CONF" "$REPO_DIR" "$SERVICE_USER" "$WEB_PORT"
   install_services "$SYSTEMD_DIR" "$REPO_DIR" "$WEB_PORT" "$RUNTIME_CONF" "$CONFIG_PATH"
   install_helper_command "$HELPER_PATH" "$RUNTIME_CONF"
   create_desktop_launcher "$LAUNCHER_USER" "$WEB_PORT" "$DESKTOP_PATH"
   start_services
 
-  log "SUCCESS: Magic Box installed. Next steps:\n  - Status: sudo systemctl status magic_lid.service magic_lid_web.service\n  - Logs: sudo journalctl -u magic_lid.service -u magic_lid_web.service -f\n  - Note: group membership changes may require reboot or re-login"
+  log "SUCCESS: Magic Box installed."
+  log "Reboot recommended to ensure group membership changes apply."
+  log "Service status commands:"
+  log "  sudo systemctl status magic_lid.service --no-pager"
+  log "  sudo systemctl status magic_lid_web.service --no-pager"
 }
 
 main "$@"

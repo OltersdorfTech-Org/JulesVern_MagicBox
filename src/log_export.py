@@ -24,9 +24,6 @@ def select_boot_root(candidates: Sequence[Path] = BOOT_CANDIDATES) -> Path:
     mounted = [candidate for candidate in candidates if candidate.exists() and os.path.ismount(candidate)]
     if mounted:
         return mounted[0]
-    existing = [candidate for candidate in candidates if candidate.exists()]
-    if existing:
-        return existing[0]
     raise FileNotFoundError("No boot partition found at /boot or /boot/firmware")
 
 
@@ -158,12 +155,8 @@ def build_export_bundle(destination_root: Path) -> Path:
 
 def ensure_writable_export_root(boot_root: Path) -> tuple[Path, Optional[str]]:
     destination_root = boot_root
-    try:
-        test_dir = destination_root / "jv_logs"
-        test_dir.mkdir(parents=True, exist_ok=True)
-        if not os.access(test_dir, os.W_OK):
-            raise PermissionError(f"{test_dir} is not writable")
-        return destination_root, None
-    except OSError as exc:
-        fallback = Path("/tmp")
-        return fallback, f"Boot partition not writable ({exc}). Wrote logs to {fallback}."
+    test_dir = destination_root / "jv_logs"
+    test_dir.mkdir(parents=True, exist_ok=True)
+    if not os.access(test_dir, os.W_OK):
+        raise PermissionError(f"{test_dir} is not writable")
+    return destination_root, None

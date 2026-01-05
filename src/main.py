@@ -17,6 +17,7 @@ from gpiozero import Button, Device, LED
 import config
 import gpio_status
 import logging_utils
+import runtime_paths
 
 
 class RemoteStateStore:
@@ -30,9 +31,9 @@ class RemoteStateStore:
 
     def __init__(self, path: Path) -> None:
         self.path = path
-        self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def _write_state(self, state: dict) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         merged = {**self.DEFAULT_STATE, **state}
         with self.path.open("w", encoding="utf-8") as handle:
             json.dump(merged, handle)
@@ -221,11 +222,11 @@ def update_outputs(hw, remote_lid_on: bool, magic_enabled: bool, safety_enabled:
 
 
 class ServiceRunner:
-    def __init__(self) -> None:
-        self.logger = logging_utils.get_logger("magicbox.main", config.LOG_FILE_MAIN)
+    def __init__(self, logger, store: RemoteStateStore) -> None:
+        self.logger = logger
         self._event_rate_limit = RateLimiter(min_interval_s=1.0)
         self.stop_event = Event()
-        self.remote_store = RemoteStateStore(config.REMOTE_STATE_FILE)
+        self.remote_store = store
         self._log_pin_factory()
         try:
             self.hardware = build_hardware(self.stop_event)
@@ -393,28 +394,26 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def handle_cli(args: argparse.Namespace, store: RemoteStateStore) -> Optional[bool]:
+def handle_cli(
+    args: argparse.Namespace,
+    store: RemoteStateStore,
+    logger,
+) -> Optional[bool]:
     if args.set_lid_remote:
         if args.set_lid_remote == "on":
             store.write(True)
-            logging_utils.get_logger("magicbox.main", config.LOG_FILE_MAIN).info(
-                "Remote LID LED state set to ON"
-            )
+            logger.info("Remote LID LED state set to ON")
         elif args.set_lid_remote == "off":
             store.write(False)
-            logging_utils.get_logger("magicbox.main", config.LOG_FILE_MAIN).info(
-                "Remote LID LED state set to OFF"
-            )
+            logger.info("Remote LID LED state set to OFF")
         elif args.set_lid_remote == "toggle":
             new_state = store.toggle()
-            logging_utils.get_logger("magicbox.main", config.LOG_FILE_MAIN).info(
-                "Remote LID LED toggled to %s", "ON" if new_state else "OFF"
-            )
+            logger.info("Remote LID LED toggled to %s", "ON" if new_state else "OFF")
         return True
 
     if args.print_status:
         state = store.read_all()
-        logging_utils.get_logger("magicbox.main", config.LOG_FILE_MAIN).info(
+        logger.info(
             "Current state: "
             f"Remote LID {'ON' if state['remote_lid_on'] else 'OFF'}, "
             f"Magic {'ON' if state['magic_flag_on'] else 'OFF'}, "
@@ -427,11 +426,16 @@ def handle_cli(args: argparse.Namespace, store: RemoteStateStore) -> Optional[bo
 
 def main() -> None:
     args = parse_args()
+    logger = logging_utils.get_logger("magicbox.main")
+    if not runtime_paths.ensure_runtime_dirs(logger, config.LOG_DIR, config.STATE_DIR):
+        raise SystemExit("Required runtime directories are not accessible.")
+    if not logging_utils.add_file_handler(logger, config.LOG_FILE_MAIN):
+        raise SystemExit("Unable to initialize file logging.")
     store = RemoteStateStore(config.REMOTE_STATE_FILE)
-    cli_only = handle_cli(args, store)
+    cli_only = handle_cli(args, store, logger)
     if cli_only:
         return
-    runner = ServiceRunner()
+    runner = ServiceRunner(logger, store)
     runner.start()
 
 

@@ -59,28 +59,22 @@ The installer is idempotent. Re-running it refreshes services and runtime config
 
 > Note: Bookworm mounts the FAT boot partition at `/boot/firmware` on most systems.
 
-### Option A: Run from a checkout already on the Pi
+### Run from a checkout already on the Pi
+Copy the repo to the Pi (USB, SCP, or `rsync`), then run:
 ```sh
 cd /path/to/JulesVern_MagicBox
 sudo ./install.sh
 ```
 
-### Option B: Windows SD card method (no Git on the Pi)
-1. On Windows, download the repository ZIP and extract it.
-2. Copy the entire `JulesVern_MagicBox` folder onto the SD card’s boot/firmware partition.
-3. Boot the Pi, open Terminal, and run:
-   ```sh
-   sudo /boot/firmware/JulesVern_MagicBox/sdcard_bootstrap/install.sh
-   ```
-
 ### What the installer does
 - Copies the repo to **`/opt/julesvern/JulesVern_MagicBox`** (override with `MAGICBOX_TARGET=/some/path`).
 - Uses the **existing user** who ran the installer (`$SUDO_USER` or `$USER`). No new users are created.
-- Adds the runtime user to `gpio`, `adm`, and `systemd-journal` groups when present.
+- Adds the runtime user to `gpio` and `adm` groups.
 - Installs required packages via apt: `python3-gpiozero`, `python3-lgpio`, `python3-rpi.gpio`, `python3-flask`, and `wireless-tools`.
-- Creates writable data at **`/var/lib/julesverne_magicbox`** (override with `MAGICBOX_DATA_DIR`).
-- Creates writable logs at **`/var/log/julesverne_magicbox`** (override with `MAGICBOX_LOG_DIR`).
-- Writes `/etc/julesverne_magicbox/runtime.conf` with `JV_USER`, `JV_REPO_DIR`, and log/data paths.
+- Verifies the system Python at `/usr/bin/python3 --version`.
+- Creates runtime state at **`/var/lib/julesverne_magicbox`** and logs at **`/var/log/julesverne_magicbox`**.
+- Sets ownership to the installer user and group `adm` with mode `775`.
+- Writes `/etc/julesverne_magicbox/runtime.conf` with `JV_USER`, `JV_REPO_DIR`, and `MAGICBOX_WEB_PORT`.
 - Installs systemd units: `magic_lid.service`, `magic_lid_web.service`, `magic_lid.path`, `jv-status-led.service`, and `jv-poweroff.service`.
 - Enables and starts services immediately—no manual `systemctl enable` required.
 - Installs helper CLI `magicbox` and a desktop launcher for the invoking user.
@@ -89,10 +83,11 @@ sudo ./install.sh
 
 - **Autostart on boot:** both services start headlessly after networking is ready; no login or GUI needed.
 - **Web UI:** available at `http://<pi-ip>:8080` by default (override during install with `MAGICBOX_WEB_PORT=<port>`).
-- **Data & config:** remote state lives at `/var/lib/julesverne_magicbox/state/lid_remote_state.json`. GPIO status snapshots are written to `/var/lib/julesverne_magicbox/state/gpio_status.json`. Pin mappings and other tunables remain in `src/config.py` within `/opt/julesvern/JulesVern_MagicBox` (or your chosen install path).
+- **Data & config:** remote state lives at `/var/lib/julesverne_magicbox/lid_remote_state.json`. GPIO status snapshots are written to `/var/lib/julesverne_magicbox/gpio_status.json`. Pin mappings and other tunables remain in `src/config.py` within `/opt/julesvern/JulesVern_MagicBox` (or your chosen install path).
 - **Logging:** persistent logs are written to `/var/log/julesverne_magicbox/` and also stream to journald.
 - **Config change auto-restart:** `magic_lid.path` restarts `magic_lid.service` whenever `config.py` changes.
 - **Restart policy:** `Restart=always` with a 2s backoff on both units.
+- **Boot partition safety:** the application never writes to `/boot` or `/boot/firmware`. The FAT partition is export-only (see log export below).
 
 ## Pi Ops Quickstart
 
@@ -127,7 +122,7 @@ sudo systemctl start magic_lid.service
 ```sh
 sudo python3 tools/export_logs_to_boot.py
 ```
-Copies the latest logs to `/boot/jv_logs/` (or `/boot/firmware/jv_logs/`) so Windows can read them.
+Copies the latest logs to `/boot/firmware/jv_logs/` if mounted, otherwise `/boot/jv_logs/`.
 
 ### Health check
 ```sh
@@ -149,7 +144,7 @@ The web UI provides large touch-friendly controls for safety, shutdown, GPIO con
 ### Download logs (web)
 
 **Intent:** provide a one-click way to download a ZIP of logs to the browser client device.  
-**Setup:** open the web UI and click **Download logs** in the Logs card.  
+**Setup:** open the web UI and click **Download Logs** in the Logs card.  
 **Why this design:** the server packages the two persistent log files plus journal tails into a single ZIP for easy support sharing.  
 **Assumptions:** the service user can read `journalctl` output (typically via `adm` or `systemd-journal` group membership).
 
@@ -256,4 +251,4 @@ magicbox stop|start    # stop/start both
 ## Notes
 
 - Group membership changes may require a reboot or re-login before GPIO access works.
-- If `/var/log/julesverne_magicbox` is not writable, the services fall back to a log folder in the service user's home directory.
+- The application never writes to `/boot` or `/boot/firmware`; the FAT partition is export-only.

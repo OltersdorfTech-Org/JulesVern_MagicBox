@@ -17,6 +17,7 @@ sys.path.insert(0, str(BASE_DIR))
 
 import config
 import logging_utils
+import runtime_paths
 from status_led import StatusLED
 
 GPIO_PIN = 12
@@ -79,7 +80,7 @@ PATTERNS = {
     ],
 }
 
-logger = logging_utils.get_logger("magicbox.status_led", config.LOG_FILE_GPIO)
+logger = logging_utils.get_logger("magicbox.status_led")
 
 
 def _command_output(command: list[str], timeout: float = 2.0) -> Optional[str]:
@@ -195,6 +196,10 @@ def select_led_mode() -> tuple[str, str]:
 
 
 def main() -> None:
+    if not runtime_paths.ensure_runtime_dirs(logger, config.LOG_DIR):
+        raise SystemExit("Required runtime directories are not accessible.")
+    if not logging_utils.add_file_handler(logger, config.LOG_FILE_MAIN):
+        raise SystemExit("Unable to initialize file logging.")
     led = StatusLED(GPIO_PIN, log=logger.info)
 
     def _handle_signal(_signum, _frame):

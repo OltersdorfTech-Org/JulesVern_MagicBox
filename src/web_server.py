@@ -20,6 +20,7 @@ from typing import Dict, Optional
 from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 import config
 import logging_utils
+import runtime_paths
 from gpio_status import read_status
 from main import RemoteStateStore
 
@@ -30,12 +31,11 @@ TEMPLATE_DIR = BASE_DIR / "templates"
 
 app = Flask(__name__, template_folder=str(TEMPLATE_DIR))
 state_store = RemoteStateStore(config.REMOTE_STATE_FILE)
-logger = logging_utils.get_logger("magicbox.web", config.LOG_FILE_WEB)
+logger = logging_utils.get_logger("magicbox.web")
 
 LOG_FILE_OPTIONS = {
     "main": config.LOG_FILE_MAIN,
     "web": config.LOG_FILE_WEB,
-    "gpio": config.LOG_FILE_GPIO,
 }
 
 PHYSICAL_TO_BCM: Dict[int, Optional[int]] = {
@@ -446,6 +446,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if not runtime_paths.ensure_runtime_dirs(logger, config.LOG_DIR, config.STATE_DIR):
+        raise SystemExit("Required runtime directories are not accessible.")
+    if not logging_utils.add_file_handler(logger, config.LOG_FILE_WEB):
+        raise SystemExit("Unable to initialize file logging.")
     logger.info(
         "Starting Magic Lid web UI on http://0.0.0.0:%s — intended for trusted home networks.",
         args.port,
