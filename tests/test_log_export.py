@@ -9,20 +9,22 @@ sys.path.insert(0, str(BASE_DIR))
 import log_export
 
 
-def test_select_boot_root_prefers_existing():
+def test_select_boot_root_prefers_existing(monkeypatch):
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
         candidate1 = temp_path / "boot"
         candidate2 = temp_path / "boot2"
         candidate2.mkdir()
+        monkeypatch.setattr(log_export.os.path, "ismount", lambda path: path == candidate2)
         selected = log_export.select_boot_root([candidate1, candidate2])
         assert selected == candidate2
 
 
-def test_select_boot_root_raises_when_missing():
+def test_select_boot_root_raises_when_missing(monkeypatch):
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
         candidate1 = temp_path / "boot"
+        monkeypatch.setattr(log_export.os.path, "ismount", lambda _path: False)
         try:
             log_export.select_boot_root([candidate1])
         except FileNotFoundError as exc:

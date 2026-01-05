@@ -14,20 +14,16 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, Callable
 
-# Base directory paths
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.environ.get("MAGICBOX_DATA_DIR", BASE_DIR / "data"))
-STATE_DIR = Path(os.environ.get("MAGICBOX_STATE_DIR", DATA_DIR / "state"))
-STATE_DIR.mkdir(parents=True, exist_ok=True)
+# Runtime directory paths (created at startup, not import time)
+STATE_DIR = Path("/var/lib/julesverne_magicbox")
+LOG_DIR = Path("/var/log/julesverne_magicbox")
 REMOTE_STATE_FILE = STATE_DIR / "lid_remote_state.json"
 STATUS_FILE = STATE_DIR / "gpio_status.json"
 STATUS_STALE_SECONDS = float(os.environ.get("MAGICBOX_STATUS_STALE_SECONDS", "5"))
 
 # Logging configuration
-LOG_DIR = Path(os.environ.get("MAGICBOX_LOG_DIR", "/var/log/julesverne_magicbox"))
 LOG_FILE_MAIN = LOG_DIR / "main.log"
 LOG_FILE_WEB = LOG_DIR / "web.log"
-LOG_FILE_GPIO = LOG_DIR / "gpio.log"
 LOG_LEVEL = os.environ.get("MAGICBOX_LOG_LEVEL", "INFO")
 LOG_ROTATION_BYTES = int(os.environ.get("MAGICBOX_LOG_ROTATION_BYTES", "1048576"))
 LOG_BACKUP_COUNT = int(os.environ.get("MAGICBOX_LOG_BACKUP_COUNT", "5"))
