@@ -12,7 +12,7 @@ from pathlib import Path
 from threading import Event, Thread
 from typing import Optional
 
-from gpiozero import Button, LED
+from gpiozero import Button, Device, LED
 
 import config
 import gpio_status
@@ -226,6 +226,7 @@ class ServiceRunner:
         self._event_rate_limit = RateLimiter(min_interval_s=1.0)
         self.stop_event = Event()
         self.remote_store = RemoteStateStore(config.REMOTE_STATE_FILE)
+        self._log_pin_factory()
         try:
             self.hardware = build_hardware(self.stop_event)
         except Exception as exc:  # noqa: BLE001 - hardware failures should be logged and surfaced
@@ -240,6 +241,20 @@ class ServiceRunner:
         self.magic_enabled = state["magic_flag_on"]
         self.safety_enabled = state["safety_enabled"]
         self.last_error: Optional[str] = None
+
+    def _log_pin_factory(self) -> None:
+        try:
+            factory = Device.pin_factory
+        except Exception as exc:  # noqa: BLE001
+            self.logger.exception("GPIO pin factory initialization failed: %s", exc)
+            raise SystemExit("GPIO pin factory unavailable.") from exc
+
+        if factory is None:
+            self.logger.error("GPIO pin factory unavailable; check lgpio/RPi.GPIO installs.")
+            raise SystemExit("GPIO pin factory unavailable.")
+
+        factory_name = getattr(factory, "name", factory.__class__.__name__)
+        self.logger.info("GPIO pin factory in use: %s", factory_name)
 
     def start(self) -> None:
         self.logger.info("Magic Lid service starting...")

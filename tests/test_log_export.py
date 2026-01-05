@@ -31,7 +31,7 @@ def test_select_boot_root_raises_when_missing():
             raise AssertionError("Expected FileNotFoundError")
 
 
-def test_build_export_bundle_uses_timestamped_dir(tmp_path, monkeypatch):
+def test_build_export_bundle_creates_log_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(log_export, "_run_command", lambda _cmd: "ok")
     state_file = tmp_path / "state.json"
     state_file.write_text("{}", encoding="utf-8")
@@ -41,3 +41,4 @@ def test_build_export_bundle_uses_timestamped_dir(tmp_path, monkeypatch):
     assert (export_dir / "system_info.txt").exists()
     assert (export_dir / "config_snapshot.json").exists()
     assert (export_dir / "state_snapshot.json").exists()
+    assert (export_dir / "LAST_EXPORT.txt").exists()

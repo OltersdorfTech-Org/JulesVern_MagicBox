@@ -8,14 +8,16 @@ trusted home networks.
 """
 import argparse
 import importlib
+import io
 import re
 import subprocess
 import time
+import zipfile
 from collections import deque
 from pathlib import Path
 from typing import Dict, Optional
 
-from flask import Flask, jsonify, redirect, render_template, request, url_for
+from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 import config
 import logging_utils
 from gpio_status import read_status
@@ -257,6 +259,52 @@ def _read_log_tail(path: Path, lines: int) -> str:
     return "\n".join(buffer)
 
 
+def _run_journal(service: str, lines: int = 200) -> str:
+    try:
+        result = subprocess.run(
+            ["journalctl", "-u", service, "-n", str(lines), "--no-pager"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+    except FileNotFoundError:
+        return "journalctl not available on this system."
+    except subprocess.TimeoutExpired:
+        return "journalctl timed out while collecting logs."
+    if result.returncode != 0:
+        return result.stderr.strip() or result.stdout.strip() or "journalctl failed."
+    return result.stdout.strip()
+
+
+def _write_log_to_zip(zip_file: zipfile.ZipFile, path: Path) -> None:
+    if path.exists():
+        zip_file.write(path, arcname=path.name)
+    else:
+        zip_file.writestr(path.name, "Log file not found on disk.")
+
+
+def build_log_archive() -> io.BytesIO:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+        _write_log_to_zip(zip_file, config.LOG_FILE_MAIN)
+        _write_log_to_zip(zip_file, config.LOG_FILE_WEB)
+        zip_file.writestr(
+            "journal_magic_lid.txt",
+            _run_journal("magic_lid.service"),
+        )
+        zip_file.writestr(
+            "journal_magic_lid_web.txt",
+            _run_journal("magic_lid_web.service"),
+        )
+        zip_file.writestr(
+            "README.txt",
+            "Magic Box log bundle (main.log, web.log, journal tails).",
+        )
+    buffer.seek(0)
+    return buffer
+
+
 @app.get("/api/logs")
 def api_logs():
     file_key = request.args.get("file", "main").strip().lower()
@@ -275,6 +323,17 @@ def api_logs():
         payload = ""
         missing = True
     return jsonify({"file": file_key, "lines": payload, "missing": missing})
+
+
+@app.get("/api/logs/download")
+def api_logs_download():
+    archive = build_log_archive()
+    return send_file(
+        archive,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="magicbox_logs.zip",
+    )
 
 
 @app.post("/lid/on")

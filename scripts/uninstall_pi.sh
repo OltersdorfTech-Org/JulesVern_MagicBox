@@ -39,28 +39,15 @@ purge_data() {
   fi
 }
 
-maybe_remove_user() {
-  local user="$1"
-  if id -u "$user" >/dev/null 2>&1; then
-    if [ "${REMOVE_USER:-0}" -eq 1 ]; then
-      deluser --remove-home "$user" || true
-      log "Removed service user $user"
-    else
-      log "Leaving service user $user in place (set REMOVE_USER=1 to delete)"
-    fi
-  fi
-}
-
 main() {
   require_root
 
   SYSTEMD_DIR="/etc/systemd/system"
   HELPER_PATH="/usr/local/bin/magicbox"
-  CONFIG_DIR="/etc/magicbox"
-  CONFIG_FILE="$CONFIG_DIR/config"
-  DEFAULT_REPO_DIR="/opt/julesvern"
-  DEFAULT_DATA_DIR="/var/lib/julesvern"
-  DEFAULT_USER="julesvern"
+  CONFIG_DIR="/etc/julesverne_magicbox"
+  CONFIG_FILE="$CONFIG_DIR/runtime.conf"
+  DEFAULT_REPO_DIR="/opt/julesvern/JulesVern_MagicBox"
+  DEFAULT_DATA_DIR="/var/lib/julesverne_magicbox"
 
   # Load saved config if present
   if [ -f "$CONFIG_FILE" ]; then
@@ -68,14 +55,14 @@ main() {
     source "$CONFIG_FILE"
   fi
 
-  REPO_DIR=${REPO_DIR:-$DEFAULT_REPO_DIR}
-  DATA_DIR=${DATA_DIR:-$DEFAULT_DATA_DIR}
-  SERVICE_USER=${SERVICE_USER:-$DEFAULT_USER}
+  REPO_DIR=${JV_REPO_DIR:-$DEFAULT_REPO_DIR}
+  DATA_DIR=${MAGICBOX_DATA_DIR:-$DEFAULT_DATA_DIR}
 
   log "Stopping and removing systemd units"
   remove_service "magic_lid.service" "$SYSTEMD_DIR"
   remove_service "magic_lid_web.service" "$SYSTEMD_DIR"
   remove_service "jv-status-led.service" "$SYSTEMD_DIR"
+  remove_service "magic_lid.path" "$SYSTEMD_DIR"
   remove_service "jv-poweroff.service" "$SYSTEMD_DIR"
   systemctl daemon-reload
 
@@ -105,8 +92,6 @@ main() {
   else
     log "Leaving data directory at $DATA_DIR (set PURGE_DATA=1 to delete)"
   fi
-
-  maybe_remove_user "$SERVICE_USER"
 
   log "Uninstall complete"
 }

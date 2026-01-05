@@ -26,7 +26,7 @@ def main() -> int:
     print("Logs exported.")
     print(f"Export folder: {export_dir}")
     print("Copy off the SD card from Windows by opening the boot partition and")
-    print("browsing to the jv_logs/<timestamp>/ folder.")
+    print("browsing to the jv_logs/ folder.")
     return 0
 
 

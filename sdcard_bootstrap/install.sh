@@ -28,8 +28,8 @@ main() {
   require_root
   SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   SOURCE_REPO=$(cd "$SCRIPT_DIR/.." && pwd)
-  TARGET_REPO=${MAGICBOX_TARGET:-/home/pi/JulesVern_MagicBox}
-  TARGET_USER=${MAGICBOX_USER:-${SUDO_USER:-pi}}
+  TARGET_REPO=${MAGICBOX_TARGET:-/home/${SUDO_USER:-$USER}/JulesVern_MagicBox}
+  TARGET_USER=${MAGICBOX_USER:-${SUDO_USER:-$USER}}
 
   if [ ! -d "$SOURCE_REPO/src" ]; then
     echo "Could not find the Magic Box repository beside this script." >&2
