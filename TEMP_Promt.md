@@ -1,142 +1,193 @@
-You are modifying this repo: https://github.com/OltersdorfTech-Org/JulesVern_MagicBox
+# CODEX AGENT PROMPT — JulesVern_MagicBox repo refactor + Bookworm-stable GPIO + logging/export + README cleanup
 
-Follow AGENTS.md conventions for structure, testing, logging, and changes. Do NOT harden security; this device is intended for trusted LAN use and should prioritize debuggability and “just works.”
+You are a code-modifying agent working on this repository:
+https://github.com/OltersdorfTech-Org/JulesVern_MagicBox
 
-## Problem report (from physical Raspberry Pi Zero 2 W test)
+## Context / problems to fix (from real device logs)
+- `magic_lid.service` fails at boot and/or is in an error state.
+- GPIO initialization fails with gpiozero backends missing (`No module named 'lgpio'`, `No module named 'RPi'`, `No module named 'pigpio'`) and then `OSError: [Errno 22] Invalid argument` when it falls back to deprecated sysfs export.
+- Logs are not reliably persisted to the SD card and not exported to the Windows-readable FAT boot partition.
+- Repo has duplication / drift (multiple installer scripts, outdated files). Needs refactor: remove old files, consolidate install flow, simplify, update README with clean commands.
+- Must target Raspberry Pi OS **Bookworm** (Debian 12), timeframe ~ Nov 2025.
+  - Bookworm mounts the FAT boot partition at `/boot/firmware` (not `/boot`). (Confirm in your research + implement robust detection.)
+  - Default Python is typically 3.11.x; avoid relying on Python 3.13 for GPIO compatibility.
+- Must NOT create new users. Use the *existing* user that runs the installer, and elevate via sudo when needed.
+- GPIO service must automatically start on boot, and pin updates via `config.py` must take effect post-boot (via restart trigger or safe reload).
+- Web GUI must include an option to download logs to the *client device* (the browser user) as a file.
 
-Physical wiring used in test:
-- GPIO12 -> Red LED -> 330Ω -> GND  (Status LED)
-- GPIO04 -> White LED -> 150Ω -> GND (Lid light LED)
-- GPIO27 -> Lid switch -> GND (active-low)
+## High-level approach (research + confirm best practice before changing code)
+1. Inspect the repo structure and current install/service/logging approach.
+2. Identify duplicates (especially install.sh or older variants), deprecated folders, unused scripts. Produce a plan, then implement:
+   - Consolidate to ONE installer entrypoint (e.g., `install.sh`), and remove/archived duplicates.
+   - Standardize paths and naming (services, log dir, tools).
+3. Fix GPIO backend availability on Bookworm:
+   - Ensure installer uses apt (not pip) to install: `python3-gpiozero`, `python3-lgpio`, and `python3-rpi.gpio` (and any other required OS packages).
+   - Ensure the runtime uses system python (`/usr/bin/python3`) unless you can prove a venv is safe *and* includes system site packages (`--system-site-packages`). GPIO backends are often OS-packaged.
+4. Logging:
+   - Ensure persistent logs stored on ext4 in `/var/log/julesverne_magicbox/` (or similarly named, choose one and standardize).
+   - Ensure log directory permissions are correct for the service user.
+   - Keep journald logging available too (do not disable).
+5. Export logs to FAT boot partition so Windows can read:
+   - Robustly detect `/boot/firmware` vs `/boot`.
+   - Copy latest logs to `/boot/firmware/jv_logs/` (or `/boot/jv_logs/` fallback).
+   - Provide a tool script `tools/export_logs_to_boot.py` and document it.
+   - Must handle permissions (FAT mount is typically root-owned); script should be run with sudo.
+6. Service reliability:
+   - Provide/repair `magic_lid.service` and `magic_lid_web.service`.
+   - Must start at boot, auto-restart on crash.
+   - Must run as the existing user (installer user). Do not create a special service user.
+   - Ensure the service can access GPIO by adding installer user to `gpio` group.
+7. Pins update post-boot:
+   - Implement a systemd `.path` unit (preferred) that restarts `magic_lid.service` when `config.py` changes; OR implement safe config reload in code. Choose the most robust + simplest.
+8. Web GUI log download to client device:
+   - Add an endpoint that returns a ZIP (or tar.gz) of logs and optionally recent journal tail.
+   - Add a simple “Download Logs” button in the UI to fetch that file.
 
-Observed behavior:
-- Immediately on power, GPIO04 lid LED is dimly illuminated solid (before app fully boots).
-- During boot, GPIO12 blinks “booting” as expected, then goes solid “ready” for ~5 seconds.
-- Web service is running and connectable.
-- Then GPIO12 changes to repeated 2-blink error pattern.
-- GPIO04 lid LED never changes (stays dim).
-- Lid switch has no effect; web GUI shows unknown lid switch state.
-- Restarting `sudo systemctl restart magic_lid.service` reproduces the same results.
+## Concrete tasks (do these in-repo)
 
-Logging/export issues:
-- Logs are now visible on-device, but are NOT exportable to boot folder for easy reading on Windows / importing into Codex.
-- Running `sudo python3 tools/export_logs_to_boot.py` gives a path/file-not-found error.
-- Manual copy from `/var/log/julesverne_magicbox/` to `/boot/firmware/jv_logs` hits permissions errors.
+### A) Repository refactor / dedup
+- Identify duplicate install scripts and any obsolete files.
+- Delete or move old/unused scripts in a clearly labeled folder (e.g., `deprecated/`), or remove entirely if safe.
+- Make ONE canonical installer: `install.sh` (or `scripts/install.sh`) — pick one location, update README accordingly.
+- Ensure the repo structure is clean:
+  - `tools/` for utilities like export and health check
+  - `services/` or `systemd/` for unit files
+  - `web/` or `ui/` for the web GUI assets
+  - avoid multiple copies of the same file with minor changes
 
-Installer requirement:
-- Installer must set/grant FULL practical permissions for the normal user and/or provide a frictionless export mechanism.
-- This device is NOT intended to be hardened. Prefer usability and diagnostics.
+### B) Installer (Bookworm-safe; no assumptions)
+Installer must:
+- `sudo apt update`
+- install required apt packages (at minimum):
+  - `python3-gpiozero`
+  - `python3-lgpio`
+  - `python3-rpi.gpio`
+  - plus any required for the web service (flask/fastapi/etc) using apt if available; otherwise use venv **with** `--system-site-packages` so it can see apt-provided gpio libs.
+- add the installer-running user (call it `$SUDO_USER` if present, else `$USER`) to groups:
+  - `gpio`, and optionally `adm` so it can read logs; do not assume group exists—check and handle.
+- install/enable systemd units:
+  - `magic_lid.service`
+  - `magic_lid_web.service`
+  - `magic_lid.path` (if you choose path-trigger restart)
+- create log dir:
+  - `/var/log/julesverne_magicbox/`
+  - set ownership to the runtime user and group `adm` (or appropriate), mode 775
+- print post-install instructions, including “reboot recommended to apply group membership”
 
-## Primary goals
+### C) Systemd units
+Provide/repair unit files with these requirements:
+- Run as the existing user (the one who installed), not root.
+  - Implement by writing a config file at install time (e.g., `/etc/julesverne_magicbox/runtime.conf`) containing `JV_USER=...`, then `EnvironmentFile=` in the unit, and `User=${JV_USER}`.
+- Use `/usr/bin/python3` for GPIO service unless you can justify venv approach.
+- `WorkingDirectory` set to repo install location (determine; likely `/opt/julesvern/JulesVern_MagicBox`).
+- `Restart=always`, `RestartSec=2`
+- Ensure services can read `config.py`.
+- For logging: either let journald capture stdout/stderr AND app writes its own file logs. Do not rely solely on `StandardOutput=append:` because file ownership can be tricky.
 
-A) Make GPIO behavior correct with the provided wiring:
-- GPIO4 must be configured as a proper output and should default to OFF (LOW) immediately at service start.
-- GPIO27 lid switch must be read reliably (active-low with pull-up enabled) and reflected in both:
-  1) the GPIO service behavior
-  2) the web UI state display
-- GPIO12 status LED patterns must correspond to real fault states and be backed by a clear log message.
+### D) Python logging (persistent)
+In `Main.py` and the web service entrypoint:
+- Use Python `logging` with `RotatingFileHandler` writing to:
+  - `/var/log/julesverne_magicbox/main.log`
+  - `/var/log/julesverne_magicbox/web.log`
+- Include timestamps, level, module, line number.
+- Ensure errors go to `*.err.log` OR include ERROR-level in same file; pick a consistent scheme.
+- Make sure the log dir exists; if not, fall back to user home dir with a warning (but installer should create it).
 
-B) Fix the “unknown lid switch state” in the web UI:
-- The web UI must display a definite state (OPEN/CLOSED or HIGH/LOW) once the GPIO service is up.
-- If the GPIO service is down/unavailable, show an explicit error (not “unknown”) and include the last error message.
+### E) Tools
+Add these tools (or refactor existing ones):
+1) `tools/export_logs_to_boot.py`
+   - When run with sudo, it copies latest persistent logs to:
+     - `/boot/firmware/jv_logs/` if `/boot/firmware` is a mountpoint
+     - else `/boot/jv_logs/`
+   - Copies `main.log`, `web.log`, and optionally `*.err.log`, plus a `LAST_EXPORT.txt` timestamp.
+   - Must not crash if logs missing.
+2) `tools/jvmb_health.py`
+   - Prints:
+     - systemd service status for `magic_lid.service` and `magic_lid_web.service`
+     - last 100-200 lines of journal for each service
+     - tail of persistent logs
+     - wifi status (basic), internet reachability (ping or curl), disk free %
+   - Must run without needing additional packages beyond what installer provides.
+   - If run without sudo, degrade gracefully (print what it can).
 
-C) Fix log exporting so Windows can read logs from the boot partition:
-- Provide a robust export script and a CLI entry point (e.g., `magicbox export-logs`) that:
-  - Works no matter the current working directory.
-  - Collects logs from journald for both services (magic_lid.service and magic_lid_web.service) AND any app log files if present.
-  - Writes them into a boot-partition folder that exists and is predictable:
-    - Prefer `/boot/firmware/jv_logs/` (Bookworm), but auto-fallback to `/boot/jv_logs/` if `/boot/firmware` is not present.
-  - Creates a timestamped subfolder: `jv_logs/YYYY-MM-DD_HHMMSS/`
-  - Writes:
-    - `magic_lid.service.log` (journalctl output)
-    - `magic_lid_web.service.log` (journalctl output)
-    - `system_info.txt` (uname, OS release, python version, pip freeze, ip addr)
-    - `config_snapshot.json/txt` (current pin mapping + key settings)
-    - `state_snapshot.json` (remote state file if used)
-  - Ends by printing the exact export path and how to copy it off from Windows.
+### F) GPIO backend + compatibility
+- Ensure gpiozero uses a real backend on Bookworm:
+  - Prefer lgpio or RPi.GPIO.
+  - Avoid sysfs export fallback.
+- Add a short runtime self-check in `Main.py` startup:
+  - Log which pin factory is in use (gpiozero can reveal this).
+  - If no usable backend, log a clear fatal message and exit.
 
-D) Fix installer permissions so exports and logs don’t get blocked:
-- Ensure the runtime user has practical read access to logs and state.
-- Ensure the export script works when run via sudo and also works when run as the normal user IF possible.
-- If boot partition permissions are the blocker (vfat mount behavior), ensure the export tool can still complete by:
-  - Running the final write step via sudo OR
-  - Writing into a location that is guaranteed writable, then copying into boot via sudo.
-- Prefer “it works” over perfect POSIX purity.
+### G) Config pin changes post-boot
+- Implement systemd path unit:
+  - `magic_lid.path` watches the actual config file path and triggers restart of `magic_lid.service` on modification.
+- Document it and ensure it’s enabled.
 
-## Implementation details / expected changes
+### H) Web GUI: download logs to client device
+- Add a backend endpoint:
+  - `GET /api/logs/download` → returns a ZIP containing:
+    - `/var/log/julesverne_magicbox/main.log`
+    - `/var/log/julesverne_magicbox/web.log`
+    - optionally `journalctl -u magic_lid.service -n 200` output as `journal_magic_lid.txt`
+    - optionally `journalctl -u magic_lid_web.service -n 200` output as `journal_magic_lid_web.txt`
+- Frontend:
+  - Add a “Download Logs” button that triggers browser download.
+- Security:
+  - If the web UI is intended for LAN only, keep it simple; otherwise add minimal protection (at least optional basic auth or “local only” binding). Decide based on existing repo patterns.
 
-1) Pin mapping + early initialization
-- Locate the pin configuration (likely `src/config.py` or equivalent).
-- Update defaults to match the test wiring:
-  - STATUS_LED = GPIO12
-  - LID_LED = GPIO4
-  - LID_SWITCH = GPIO27
-- Ensure LEDs are initialized as outputs with initial OFF state immediately.
-  - If using gpiozero, use LED(..., initial_value=False) where available.
-  - If using RPi.GPIO, set mode and output LOW before any other logic.
-- Ensure the lid switch uses pull-up and is debounced (software debounce ~20–50ms).
-- If the service crashes during init, log the exception and blink the 2-blink pattern (or define a clearer pattern map).
+## README rewrite (clean + practical)
+Rewrite README so it is:
+- minimal, correct, Bookworm-targeted
+- includes install steps and what it installs (do not assume anything is present)
+- includes the helpful command snippets exactly like these (update paths if needed):
 
-2) Service error clarity
-- Wherever the status LED 2-blink pattern is triggered, also log:
-  - the exception stack trace
-  - a short “fault reason” string
-- Add a “health” endpoint or status file that the web UI can read to show:
-  - whether GPIO service is running
-  - last read of lid switch
-  - last error (if any)
+Service status:
+sudo systemctl status magic_lid.service --no-pager
+sudo systemctl status magic_lid_web.service --no-pager
 
-3) Web UI “unknown lid switch state”
-- Ensure web UI reads from the same source as the GPIO controller (shared module / IPC / state file).
-- If the GPIO service is the authority, expose state via:
-  - a local file in `/var/lib/julesvern/state/` OR
-  - localhost HTTP endpoint OR
-  - Unix socket
-  Choose simplest that matches existing architecture.
-- Replace “unknown” with:
-  - “OPEN” / “CLOSED” if valid
-  - “GPIO SERVICE DOWN: <reason>” if invalid/unavailable
+View logs (journald):
+sudo journalctl -u magic_lid.service -n 200 --no-pager
+sudo journalctl -u magic_lid.service -f
+sudo journalctl -u magic_lid_web.service -n 200 --no-pager
 
-4) Log export tooling
-- Fix `tools/export_logs_to_boot.py` so it:
-  - Uses absolute paths based on `__file__` and repo root detection.
-  - Never assumes a working directory.
-  - Autodetects boot mount path: `/boot/firmware` else `/boot`.
-  - Creates `jv_logs` and a timestamp subfolder.
-  - Uses `journalctl` to dump logs for both services.
-  - Captures system info snapshots.
-- Add command to helper CLI (`magicbox`) if present:
-  - `magicbox export-logs` -> runs the exporter and prints the final path.
+View persistent log files:
+sudo tail -n 200 /var/log/julesverne_magicbox/main.log
+sudo tail -n 200 /var/log/julesverne_magicbox/web.log
+sudo ls -lah /var/log/julesverne_magicbox/
 
-5) Installer changes
-- In install scripts (install.sh and sdcard_bootstrap install if relevant):
-  - Ensure required directories exist:
-    - `/var/lib/julesvern/...`
-    - optional `/var/log/julesverne_magicbox/...` if the project uses file logs
-    - `/boot/firmware/jv_logs` (or create on first export)
-  - Ensure ownership/permissions are practical:
-    - Give the launcher user and/or `julesvern` user read/write as needed.
-    - If using a dedicated service user, add the invoking user (pi) to the same group.
-    - Prefer group-writable dirs and/or ACLs; if simplest, allow broad write for logs/export dirs.
-- Update README with:
-  - The confirmed wiring table matching GPIO12/GPIO4/GPIO27.
-  - A short “Export logs to Windows” section with one command.
+Restart / stop / start:
+sudo systemctl restart magic_lid.service
+sudo systemctl stop magic_lid.service
+sudo systemctl start magic_lid.service
 
-## Tests / validation
+Export logs to Windows-readable partition:
+sudo python3 tools/export_logs_to_boot.py
+Copies the latest logs to /boot/jv_logs/ (or /boot/firmware/jv_logs/) so Windows can read them.
 
-Add or update tests to cover:
-- Config mapping loads correct pins.
-- Lid switch logic inverts correctly (active-low).
-- LED outputs default OFF at startup.
-- Export script path resolution works from any working directory (unit test or integration-style test with temp dirs).
-- Web UI state display uses real state / shows meaningful errors.
+Health check:
+python3 tools/jvmb_health.py
+Prints service state, journal tail, log tail, Wi-Fi status, internet reachability, and disk free percent.
 
-## Acceptance criteria
+Also add:
+- Note that Bookworm boot partition is typically `/boot/firmware`.
+- Note that group membership changes may require reboot or re-login.
+- Note where to edit pins in `config.py` and that it auto-restarts on changes (via `.path` unit).
 
-- With the stated wiring, lid LED is OFF by default after service starts, and can be toggled by the system logic.
-- Lid switch state is correctly reported in web UI (no “unknown” when GPIO service is healthy).
-- GPIO12 error blinks correspond to real errors and the reason is visible in logs.
-- `magicbox export-logs` or `python3 tools/export_logs_to_boot.py` produces a readable folder on boot partition with journald logs and system snapshot, without path-not-found errors.
-- README includes the one-liner to export logs and the updated wiring table.
+## Acceptance criteria (must be true)
+- After running installer and rebooting, `magic_lid.service` and `magic_lid_web.service` are `active (running)`.
+- GPIO initializes without falling back to sysfs export; logs show a valid backend (lgpio or RPi.GPIO).
+- Logs persist to `/var/log/julesverne_magicbox/`.
+- `sudo python3 tools/export_logs_to_boot.py` creates `/boot/firmware/jv_logs/` (or `/boot/jv_logs/`) and copies logs there.
+- Editing `config.py` triggers service restart (and new pins take effect).
+- Web UI has a “Download Logs” button that downloads a zip to the client device.
 
-Proceed with implementation across the repo. Keep changes minimal but robust. Document any new config keys.
+## Deliverables (commit-ready)
+- Cleaned repo structure, duplicates removed.
+- Updated installer script.
+- Updated/added systemd unit files (+ optional path unit).
+- Tools added/updated (`export_logs_to_boot.py`, `jvmb_health.py`).
+- Web UI endpoint + button for downloading logs.
+- Updated README.
+- Ensure everything is referenced correctly from the install location used by the repo.
+
+Proceed to implement all changes directly in the repo with clean commits and clear messages.
