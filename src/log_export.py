@@ -21,9 +21,12 @@ SERVICE_LOGS = {
 
 
 def select_boot_root(candidates: Sequence[Path] = BOOT_CANDIDATES) -> Path:
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
+    mounted = [candidate for candidate in candidates if candidate.exists() and os.path.ismount(candidate)]
+    if mounted:
+        return mounted[0]
+    existing = [candidate for candidate in candidates if candidate.exists()]
+    if existing:
+        return existing[0]
     raise FileNotFoundError("No boot partition found at /boot or /boot/firmware")
 
 
@@ -44,7 +47,7 @@ def export_logs(
 
 
 def default_log_files() -> list[Path]:
-    return [config.LOG_FILE_MAIN, config.LOG_FILE_WEB, config.LOG_FILE_GPIO]
+    return [config.LOG_FILE_MAIN, config.LOG_FILE_WEB]
 
 
 def _run_command(command: list[str]) -> str:
@@ -131,8 +134,7 @@ def _copy_state_snapshot(destination: Path) -> None:
 
 
 def build_export_bundle(destination_root: Path) -> Path:
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    export_dir = destination_root / "jv_logs" / timestamp
+    export_dir = destination_root / "jv_logs"
     export_dir.mkdir(parents=True, exist_ok=True)
 
     export_logs(export_dir, default_log_files())
@@ -146,6 +148,10 @@ def build_export_bundle(destination_root: Path) -> Path:
         encoding="utf-8",
     )
     _copy_state_snapshot(export_dir / "state_snapshot.json")
+    _write_text(
+        export_dir / "LAST_EXPORT.txt",
+        datetime.now().isoformat(timespec="seconds"),
+    )
 
     return export_dir
 

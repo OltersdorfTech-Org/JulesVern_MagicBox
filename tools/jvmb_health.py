@@ -37,7 +37,7 @@ def service_status(service: str) -> str:
     return _run(["systemctl", "is-active", service])
 
 
-def tail_log(path: Path, lines: int = 20) -> str:
+def tail_log(path: Path, lines: int = 50) -> str:
     if not path.exists():
         return f"Log file not found: {path}"
     try:
@@ -70,7 +70,12 @@ def internet_status() -> str:
 def disk_status() -> str:
     usage = shutil.disk_usage("/")
     free_percent = (usage.free / usage.total) * 100
-    return f"Disk free: {free_percent:.1f}%"
+    free_gb = usage.free / (1024 ** 3)
+    return f"Disk free: {free_percent:.1f}% ({free_gb:.1f} GB)"
+
+
+def journal_tail(service: str, lines: int = 200) -> str:
+    return _run(["journalctl", "-u", service, "-n", str(lines), "--no-pager"])
 
 
 def main() -> int:
@@ -81,10 +86,14 @@ def main() -> int:
     print(f"{wifi_status()}")
     print(f"{internet_status()}")
     print(f"{disk_status()}")
-    print("\nLast 20 journal lines (main service):")
-    print(_run(["journalctl", "-u", MAIN_SERVICE, "-n", "20", "--no-pager"]))
-    print("\nLast 20 lines from main.log:")
+    print("\nLast 200 journal lines (main service):")
+    print(journal_tail(MAIN_SERVICE))
+    print("\nLast 200 journal lines (web service):")
+    print(journal_tail(WEB_SERVICE))
+    print("\nLast 50 lines from main.log:")
     print(tail_log(config.LOG_FILE_MAIN))
+    print("\nLast 50 lines from web.log:")
+    print(tail_log(config.LOG_FILE_WEB))
     return 0
 
 

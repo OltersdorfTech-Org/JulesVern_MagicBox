@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch Magic Box config.py for changes
+
+[Path]
+PathChanged=/opt/julesvern/JulesVern_MagicBox/src/config.py
+Unit=magic_lid.service
+
+[Install]
+WantedBy=multi-user.target

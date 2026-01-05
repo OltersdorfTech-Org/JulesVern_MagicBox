@@ -1,23 +1,22 @@
 [Unit]
-Description=Magic Lid web UI (Flask)
+Description=Magic Lid Flask web server
 After=network-online.target local-fs.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/julesvern
-ExecStart=/opt/julesvern/venv/bin/python /opt/julesvern/src/web_server.py --port 8080
-Restart=on-failure
+EnvironmentFile=/etc/julesverne_magicbox/runtime.conf
+User=${JV_USER}
+Group=${JV_USER}
+WorkingDirectory=${JV_REPO_DIR}
+ExecStart=/usr/bin/python3 ${JV_REPO_DIR}/src/web_server.py --port ${MAGICBOX_WEB_PORT}
+Restart=always
 RestartSec=2
-User=julesvern
-Group=julesvern
+TimeoutStopSec=15
+Environment=PYTHONUNBUFFERED=1
+SupplementaryGroups=gpio
 StandardOutput=journal
 StandardError=journal
-Environment=PYTHONUNBUFFERED=1
-Environment=MAGICBOX_DATA_DIR=/var/lib/julesvern
-Environment=MAGICBOX_STATE_DIR=/var/lib/julesvern/state
-Environment=MAGICBOX_LOG_DIR=/var/log/julesverne_magicbox
-SupplementaryGroups=gpio
 
 [Install]
 WantedBy=multi-user.target

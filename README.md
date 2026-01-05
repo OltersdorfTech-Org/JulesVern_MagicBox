@@ -5,7 +5,7 @@
 ![Tests](https://img.shields.io/badge/tests-in%20progress-yellow)
 ![Version](https://img.shields.io/badge/version-unknown-lightgrey)
 
-Headless-ready Raspberry Pi project that watches three switches (lid + two keys), drives four LEDs, and exposes a web UI for toggling the remote LID and Magic flicker flags. The installer now makes the Pi boot straight into both services with no manual `systemctl` steps, while also dropping a desktop launcher for optional debugging.
+Headless-ready Raspberry Pi project that watches three switches (lid + two keys), drives four LEDs, and exposes a web UI for toggling the remote LID and Magic flicker flags. It targets Raspberry Pi OS **Bookworm** (Debian 12) and uses system Python packages for GPIO reliability.
 
 > ⚠️ Confirm BCM GPIO pins before wiring (physical pin 1 is 3.3 V and **cannot** be used as a GPIO input).
 
@@ -55,7 +55,9 @@ Raspberry Pi 40-pin header (physical numbers)
 
 ## Quick install (headless boot, Raspberry Pi OS Bookworm)
 
-The installer is idempotent. Re-running it refreshes the venv, services, and desktop launcher.
+The installer is idempotent. Re-running it refreshes services and runtime config.
+
+> Note: Bookworm mounts the FAT boot partition at `/boot/firmware` on most systems.
 
 ### Option A: Run from a checkout already on the Pi
 ```sh
@@ -72,21 +74,25 @@ sudo ./install.sh
    ```
 
 ### What the installer does
-- Copies the repo to **`/opt/julesvern`** (override with `MAGICBOX_TARGET=/some/path`).
-- Creates/uses a dedicated **`julesvern`** system user (override with `MAGICBOX_USER=<user>`); adds it to the `gpio` group.
-- Creates a Python venv at `<install>/venv` and installs `requirements.txt`.
-- Creates writable data at **`/var/lib/julesvern`** (override with `MAGICBOX_DATA_DIR`); persists the remote state file there.
-- Writes and enables **both** systemd units: `magic_lid.service` (GPIO) and `magic_lid_web.service` (Flask UI). They start on boot, restart on failure, and log to journald.
-- Reloads systemd, enables, and starts services immediately—no manual `systemctl enable` required.
-- Installs helper CLI `magicbox` and a desktop launcher (`Magic Lid Web Remote.desktop`) for the launcher user (defaults to the invoking sudo user, usually `pi`).
+- Copies the repo to **`/opt/julesvern/JulesVern_MagicBox`** (override with `MAGICBOX_TARGET=/some/path`).
+- Uses the **existing user** who ran the installer (`$SUDO_USER` or `$USER`). No new users are created.
+- Adds the runtime user to `gpio`, `adm`, and `systemd-journal` groups when present.
+- Installs required packages via apt: `python3-gpiozero`, `python3-lgpio`, `python3-rpi.gpio`, `python3-flask`, and `wireless-tools`.
+- Creates writable data at **`/var/lib/julesverne_magicbox`** (override with `MAGICBOX_DATA_DIR`).
+- Creates writable logs at **`/var/log/julesverne_magicbox`** (override with `MAGICBOX_LOG_DIR`).
+- Writes `/etc/julesverne_magicbox/runtime.conf` with `JV_USER`, `JV_REPO_DIR`, and log/data paths.
+- Installs systemd units: `magic_lid.service`, `magic_lid_web.service`, `magic_lid.path`, `jv-status-led.service`, and `jv-poweroff.service`.
+- Enables and starts services immediately—no manual `systemctl enable` required.
+- Installs helper CLI `magicbox` and a desktop launcher for the invoking user.
 
 ## Runtime behavior
 
 - **Autostart on boot:** both services start headlessly after networking is ready; no login or GUI needed.
 - **Web UI:** available at `http://<pi-ip>:8080` by default (override during install with `MAGICBOX_WEB_PORT=<port>`).
-- **Data & config:** remote state lives at `/var/lib/julesvern/state/lid_remote_state.json`. GPIO status snapshots are written to `/var/lib/julesvern/state/gpio_status.json` (stale threshold via `MAGICBOX_STATUS_STALE_SECONDS`). Pin mappings and other tunables remain in `src/config.py` within `/opt/julesvern` (or your chosen install path).
+- **Data & config:** remote state lives at `/var/lib/julesverne_magicbox/state/lid_remote_state.json`. GPIO status snapshots are written to `/var/lib/julesverne_magicbox/state/gpio_status.json`. Pin mappings and other tunables remain in `src/config.py` within `/opt/julesvern/JulesVern_MagicBox` (or your chosen install path).
 - **Logging:** persistent logs are written to `/var/log/julesverne_magicbox/` and also stream to journald.
-- **Restart policy:** `Restart=on-failure` with a 2s backoff on both units.
+- **Config change auto-restart:** `magic_lid.path` restarts `magic_lid.service` whenever `config.py` changes.
+- **Restart policy:** `Restart=always` with a 2s backoff on both units.
 
 ## Pi Ops Quickstart
 
@@ -131,7 +137,7 @@ Prints service state, journal tail, log tail, Wi-Fi status, internet reachabilit
 
 ## Web UI
 
-The web UI provides large touch-friendly controls for safety, shutdown, GPIO configuration, and a log viewer.
+The web UI provides large touch-friendly controls for safety, shutdown, GPIO configuration, and log access.
 
 ### Web log viewer
 
@@ -139,6 +145,13 @@ The web UI provides large touch-friendly controls for safety, shutdown, GPIO con
 **Setup:** start `magic_lid_web.service`, then open the web UI and expand the Logs section.  
 **Why this design:** a small API returns only the latest N lines to keep the UI responsive.  
 **Assumptions:** the service user can read `/var/log/julesverne_magicbox/`.
+
+### Download logs (web)
+
+**Intent:** provide a one-click way to download a ZIP of logs to the browser client device.  
+**Setup:** open the web UI and click **Download logs** in the Logs card.  
+**Why this design:** the server packages the two persistent log files plus journal tails into a single ZIP for easy support sharing.  
+**Assumptions:** the service user can read `journalctl` output (typically via `adm` or `systemd-journal` group membership).
 
 ## Status LED (GPIO12)
 
@@ -238,64 +251,9 @@ magicbox logs-main     # GPIO service logs
 magicbox logs-web      # web service logs
 magicbox restart       # restart both
 magicbox stop|start    # stop/start both
-magicbox open          # open http://localhost:<port> on this machine
-magicbox export-logs   # export logs to the boot partition for Windows access
 ```
 
-Direct systemd equivalents:
-- Status: `sudo systemctl status magic_lid.service magic_lid_web.service jv-status-led.service`
-- Logs: `sudo journalctl -u magic_lid.service -u magic_lid_web.service -u jv-status-led.service -f`
-- Restart: `sudo systemctl restart magic_lid.service magic_lid_web.service jv-status-led.service`
+## Notes
 
-## Configuration & customization
-
-- **Port:** set `MAGICBOX_WEB_PORT=<port>` when running `install.sh`.
-- **Install location:** `MAGICBOX_TARGET=/opt/julesvern` (default) can be changed to another absolute path.
-- **Service user:** `MAGICBOX_USER=<user>` to reuse an existing user (must have GPIO access); `MAGICBOX_LAUNCHER_USER=<desktop-user>` controls where the `.desktop` file is written.
-- **Data directory:** `MAGICBOX_DATA_DIR=/var/lib/julesvern` (default). `MAGICBOX_STATE_DIR` may be set if you need a different state path.
-- **Pin mapping:** edit `src/config.py` or use the web UI pin editor. The app respects `MAGICBOX_DATA_DIR`/`MAGICBOX_STATE_DIR` for persisted state.
-
-## Updating
-
-From the repo checkout (or after copying a fresh ZIP over the old files):
-
-```sh
-cd /path/to/JulesVern_MagicBox
-git pull                # if using Git
-sudo ./install.sh       # refresh venv, services, and launcher
-```
-
-The installer re-copies the repo into `/opt/julesvern`, keeps the service user/data directory, and reloads systemd.
-
-## Uninstall
-
-```sh
-cd /path/to/JulesVern_MagicBox
-sudo ./scripts/uninstall_pi.sh           # leaves repo and data in place
-sudo PURGE_REPO=1 PURGE_DATA=1 ./scripts/uninstall_pi.sh   # also delete repo/data
-sudo REMOVE_USER=1 ./scripts/uninstall_pi.sh               # additionally remove the julesvern user/home
-```
-
-This stops and disables both units, removes their unit files, deletes the helper, and removes `/etc/magicbox/config`. Data and repo are preserved unless the purge flags are set.
-
-## Troubleshooting
-
-- **Port already in use:** re-run `install.sh` with `MAGICBOX_WEB_PORT=<new>`.
-- **GPIO permission issues:** ensure the service user is in the `gpio` group (`sudo groups julesvern`). Re-run the installer to fix membership.
-- **Venv problems:** delete `/opt/julesvern/venv` (or your install path) and rerun `sudo ./install.sh`.
-- **Service not starting:** check logs with `journalctl -u magic_lid.service -u magic_lid_web.service -b --no-pager` for stack traces.
-- **GPIO floating inputs:** unconnected switch pins can float and cause phantom presses. Internal pull-ups are enabled in software; add external pull-ups if wiring is long, or disable unused switches in `src/config.py`.
-
-## Manual run (debugging)
-
-```sh
-source /opt/julesvern/venv/bin/activate   # adjust if you changed MAGICBOX_TARGET
-python /opt/julesvern/src/main.py         # GPIO service
-python /opt/julesvern/src/web_server.py --port 8080
-```
-
-## Safety Notes
-
-- Never drive LEDs without appropriate resistors.
-- Verify every pin assignment (BCM vs. physical) before connecting hardware.
-- Physical pin 1 supplies 3.3 V and is **not** a GPIO input—do not wire the lid switch there.
+- Group membership changes may require a reboot or re-login before GPIO access works.
+- If `/var/log/julesverne_magicbox` is not writable, the services fall back to a log folder in the service user's home directory.

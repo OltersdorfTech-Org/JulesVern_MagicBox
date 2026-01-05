@@ -14,7 +14,7 @@ from typing import Iterable, Optional
 import config
 
 LOG_FORMAT = "%Y-%m-%d %H:%M:%S"
-LOG_MESSAGE_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+LOG_MESSAGE_FORMAT = "%(asctime)s [%(levelname)s] %(name)s (%(module)s:%(lineno)d): %(message)s"
 
 
 def _ensure_log_dir(log_dir: Path) -> bool:
@@ -27,6 +27,10 @@ def _ensure_log_dir(log_dir: Path) -> bool:
 
 def _parse_level(level: str) -> int:
     return getattr(logging, level.upper(), logging.INFO)
+
+
+def _fallback_log_dir() -> Path:
+    return Path.home() / "julesverne_magicbox_logs"
 
 
 def get_logger(name: str, log_file: Optional[Path] = None) -> logging.Logger:
@@ -44,7 +48,25 @@ def get_logger(name: str, log_file: Optional[Path] = None) -> logging.Logger:
     logger.addHandler(stream_handler)
 
     if log_file is not None:
-        if _ensure_log_dir(log_file.parent):
+        log_dir = log_file.parent
+        if not _ensure_log_dir(log_dir):
+            fallback_dir = _fallback_log_dir()
+            if _ensure_log_dir(fallback_dir):
+                logger.warning(
+                    "Log directory %s is not writable; falling back to %s.",
+                    log_dir,
+                    fallback_dir,
+                )
+                log_file = fallback_dir / log_file.name
+                log_dir = fallback_dir
+            else:
+                logger.warning(
+                    "Log directory %s is not writable; file logging disabled.",
+                    log_dir,
+                )
+                log_file = None
+
+        if log_file is not None:
             file_handler = RotatingFileHandler(
                 log_file,
                 maxBytes=config.LOG_ROTATION_BYTES,
@@ -53,11 +75,6 @@ def get_logger(name: str, log_file: Optional[Path] = None) -> logging.Logger:
             )
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)
-        else:
-            logger.warning(
-                "Log directory %s is not writable; file logging disabled.",
-                log_file.parent,
-            )
 
     return logger
 
