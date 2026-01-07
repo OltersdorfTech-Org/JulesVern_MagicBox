@@ -1,0 +1,49 @@
+"""Configuration constants for the Jules Verne Magic Box."""
+
+# GPIO pins (BCM numbering)
+GPIO_LID_SWITCH = 27
+GPIO_KEY1_SWITCH = 5
+GPIO_KEY2_SWITCH = 6
+
+GPIO_STATUS_LED = 12
+GPIO_MESSAGE_LED = 4
+GPIO_KEY1_LED = 13
+GPIO_KEY2_LED = 19
+GPIO_MAGIC_LED = 26
+
+# Web UI
+WEB_HOST = "0.0.0.0"
+WEB_PORT = 5000
+
+# Defaults
+DEFAULT_MESSAGE_RECEIVED = False
+DEFAULT_GPIO_ENABLED = True
+
+# Polling / debounce
+POLL_INTERVAL_SECONDS = 0.05
+DEBOUNCE_SECONDS = 0.1
+
+# Magic LED behavior
+MAGIC_EFFECT_DURATION_SECONDS = 30
+MAGIC_PULSE_MIN_SECONDS = 0.1
+MAGIC_PULSE_MAX_SECONDS = 0.7
+
+# Status LED timing
+SHORT_BLINK_ON_SECONDS = 0.2
+SHORT_BLINK_OFF_SECONDS = 0.2
+STATUS_PAUSE_SECONDS = 1.0
+BOOT_ON_SECONDS = 0.2
+BOOT_OFF_SECONDS = 0.8
+UNKNOWN_ON_SECONDS = 0.8
+UNKNOWN_OFF_SECONDS = 0.2
+
+# Logging
+LOG_DIR = "/var/log/magicbox"
+RUNTIME_LOG_PATH = "/var/log/magicbox/magicbox.log"
+INSTALLER_LOG_PATH = "/var/log/magicbox/installer.log"
+EXPORT_DIR = "/boot/firmware/MAGICBOX_LOGS"
+LOG_MAX_BYTES = 2 * 1024 * 1024
+LOG_BACKUP_COUNT = 5
+
+# Health check intervals
+HEALTH_POLL_SECONDS = 5.0

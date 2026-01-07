@@ -1,0 +1,17 @@
+[Unit]
+Description=Jules Verne Magic Box Controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/magicbox/src
+Environment=PYTHONPATH=/opt/magicbox/src
+ExecStart=/usr/bin/python3 -m magicbox.main
+Restart=on-failure
+RestartSec=5
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
