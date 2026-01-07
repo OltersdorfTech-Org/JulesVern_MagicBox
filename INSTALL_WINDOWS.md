@@ -1,209 +1,220 @@
-# INSTALL_WINDOWS.md  
-**Install Jules Verne Magic Box on a Raspberry Pi Zero 2 W (Windows, beginner-friendly)**
+# INSTALL_WINDOWS.md
+Install Jules Verne Magic Box on a Raspberry Pi Zero 2 W (Windows)
 
-This guide walks you through preparing a microSD card on **Windows** using **Raspberry Pi Imager**, then booting a **Raspberry Pi Zero 2 W** into a headless setup (no monitor or keyboard required after install).
+This guide walks you through preparing a microSD card on **Windows**, performing a first boot on a **Raspberry Pi Zero 2 W**, and installing the **Jules Verne Magic Box** software as a managed system service.
 
-You will end with:
-- A Pi running Raspberry Pi OS (64-bit)
+This guide assumes **no SSH is required initially**. A temporary on-device desktop can be used for setup.
+
+---
+
+## What you will end with
+
+- Raspberry Pi OS (64-bit) installed
 - Wi-Fi configured
-- SSH enabled
-- The Magic Box software installed as a system service
-- A clear visual confirmation of system health via the Status LED
+- Jules Verne Magic Box project files present on the SD card
+- Software installed as a system service
+- Web UI accessible from another device on your network
+- Logs exported to a Windows-readable location on the SD card
 
 ---
 
 ## What you need
 
 ### Hardware
-- Raspberry Pi **Zero 2 W**
+- Raspberry Pi Zero 2 W
 - microSD card (16 GB or larger recommended)
-- microSD card reader for your Windows PC
-- USB power cable (wall adapter or battery pack)
-- *(Optional for setup only)* keyboard, mouse, monitor
+- microSD card reader for Windows PC
+- USB power cable
+- Mini-HDMI adapter + monitor (temporary setup)
+- USB keyboard + mouse (temporary setup)
 
 ### Windows software
-- **Raspberry Pi Imager** (official)
-- *(Optional)* Windows Terminal or PuTTY for SSH
+- Raspberry Pi Imager (official)
+- Optional: WinSCP or File Explorer
 
 ### Network
 - 2.4 GHz Wi-Fi network
-- Wi-Fi name (SSID) and password
+- Wi-Fi SSID and password
 
 ---
 
 ## Step 1 — Install Raspberry Pi Imager (Windows)
 
-1. Download **Raspberry Pi Imager** from the official Raspberry Pi website.
-2. Install and launch the application.
+1. Download Raspberry Pi Imager from the official Raspberry Pi website
+2. Install and launch the application
 
 ---
 
 ## Step 2 — Prepare the SD card (OS + headless settings)
 
-1. Insert the microSD card into your Windows PC.
-2. Open **Raspberry Pi Imager**.
-3. Click **CHOOSE DEVICE**
-   - Select **Raspberry Pi Zero 2 W**
-4. Click **CHOOSE OS**
-   - Select **Raspberry Pi OS (64-bit)**  
-     *(This project targets Raspberry Pi OS 64-bit, Debian Trixie–based.)*
-5. Click **CHOOSE STORAGE**
-   - Select your microSD card
+1. Insert the microSD card into your Windows PC
+2. Open Raspberry Pi Imager
+3. Click **CHOOSE DEVICE** → Raspberry Pi Zero 2 W
+4. Click **CHOOSE OS** → Raspberry Pi OS (64-bit)
+5. Click **CHOOSE STORAGE** → your SD card
+
+### Configure basic options
+
+Open **Advanced Options** (gear icon or Ctrl + Shift + X):
+
+- Set **hostname** (example: `jv-magicbox`)
+- Set **username and password**
+- Configure **Wi-Fi**
+- Enable **SSH** (optional, can be skipped)
+- Set locale/timezone
+
+Write the card and safely eject it.
+
+> Important: The SD card contains **only Raspberry Pi OS** at this point.
 
 ---
 
-### Configure headless options (IMPORTANT)
+## Step 3 — First boot (desktop mode)
 
-Before writing the card:
+1. Insert the SD card into the Raspberry Pi
+2. Connect monitor, keyboard, and mouse
+3. Apply power via USB
+4. Wait for the Raspberry Pi desktop to appear
 
-1. Open **Advanced Options**
-   - Click the **gear icon**  
-   - Or press **Ctrl + Shift + X**
+This first boot initializes the OS only. Project LEDs are **not meaningful yet**.
 
-Enable and configure the following:
+---
 
-#### Set hostname
-- Example: `jv-magicbox`
+## Step 3.5 — Get the project code onto the Pi (CRITICAL STEP)
 
-#### Set username and password
-- Choose a username and password you will remember
-- Write them down
+You must now place the **Jules Verne Magic Box project files onto the Pi’s SD card**.
 
-#### Configure Wi-Fi
-- Enter your Wi-Fi SSID and password
-- Set the correct Wi-Fi country
+### Option A — Download from GitHub using the Pi’s browser
 
-#### Enable SSH
-- Enable **SSH**
-- Select **password authentication**
+1. On the Pi desktop, open **Chromium**
+2. Go to:
+   https://github.com/OltersdorfTech-Org/JulesVern_MagicBox
+3. Click **Code → Download ZIP**
+4. Open the **Downloads** folder
+5. Right-click the ZIP file → **Extract Here**
+6. Move the extracted `JulesVern_MagicBox` folder to:
+   - `/home/<username>/`
 
-#### Locale (recommended)
-- Time zone
-- Keyboard layout
+---
 
-2. Click **SAVE**
-3. Click **WRITE**
-4. Wait for the write to complete
+### Option B — Copy from Windows using the SD card (NO NETWORK REQUIRED)
+
+1. Power off the Pi
+2. Remove the SD card and insert it into your Windows PC
+3. Open the SD card’s **Linux partition** using a Linux-capable reader or tool
+4. Copy the entire `JulesVern_MagicBox` folder to:
+   - `/home/<username>/`
+5. Safely eject the SD card and return it to the Pi
+6. Power the Pi back on
+
+---
+
+### Option C — Copy to the SD card’s boot partition (UNIVERSAL FALLBACK)
+
+This works on **any Windows machine**.
+
+1. Insert the SD card into Windows
+2. Open the **boot** partition (FAT32, Windows-readable)
+3. Create a folder named:
+   - `magicbox_install`
+4. Copy the `JulesVern_MagicBox.zip` file into that folder
 5. Safely eject the SD card
+6. Boot the Pi
+
+On the Pi desktop:
+
+1. Open **File Manager**
+2. Navigate to:
+   - `/boot/firmware/magicbox_install/`
+3. Right-click the ZIP file → **Extract**
+4. Move the extracted folder to:
+   - `/home/<username>/`
 
 ---
 
-## Step 3 — First boot
+## Step 4 — Find the Pi’s IP address (GUI method)
 
-1. Insert the SD card into the Raspberry Pi Zero 2 W.
-2. Connect power via USB.
+On the Pi desktop:
 
-The first boot may take several minutes.
+### Method A — Network icon
 
-### Verifying boot via Status LED
-Once wired (see `WIRING_GUIDE.md`):
+1. Click the **network icon** (top-right corner)
+2. Select **Connection Information**
+3. Write down the IPv4 address (example: `192.168.1.42`)
 
-- Booting shows a repeating blink pattern
-- A healthy system eventually indicates **Ready**
-- Errors are shown via repeating blink codes
+### Method B — Terminal (GUI)
 
-*(If LEDs are not yet wired, continue using SSH.)*
-
----
-
-## Step 4 — Connect via SSH
-
-### Option A — Hostname (recommended)
-
-```bash
-ssh <username>@<hostname>.local
-```
-
-Example:
-```bash
-ssh pi@jv-magicbox.local
-```
+1. Open **Terminal**
+2. Run:
+   ```bash
+   hostname -I
+   ```
 
 ---
 
-### Option B — IP address
+## Step 5 — Install the Magic Box software
 
-1. Check your router for connected devices
-2. Find the Pi by hostname or “raspberrypi”
-3. Connect using the IP address:
+Open **Terminal** on the Pi desktop:
 
 ```bash
-ssh <username>@192.168.x.x
-```
-
----
-
-## Step 5 — Update the Pi (recommended)
-
-```bash
-sudo apt update
-sudo apt upgrade -y
-```
-
----
-
-## Step 6 — Install the Magic Box software
-
-### Get the code onto the Pi
-
-```bash
-sudo apt install -y git
-git clone <REPO_URL_HERE>
-cd JulesVern_MagicBox
-```
-
-Replace `<REPO_URL_HERE>` with your GitHub repository URL.
-
-### Run the installer
-
-```bash
-cd src
+cd ~/JulesVern_MagicBox/src
 chmod +x installer.sh
 sudo ./installer.sh
 ```
 
 ---
 
-## Step 7 — Verify the service
+## Step 6 — Verify the service
 
 ```bash
-sudo systemctl status magicbox.service --no-pager
+sudo systemctl status magicbox.service
 ```
+
+Expected:
+- Active (running)
 
 ---
 
-## Step 8 — Access the Web UI
+## Step 7 — Access the Web UI (from another device)
 
-Open a browser on the same network:
+Do NOT use a browser on the Pi (low RAM).
 
-```text
-http://<hostname>.local
-```
+From a phone, laptop, or desktop on the same network, open:
 
-or
+- http://<pi_ip_address>/  
+or  
+- http://<pi_ip_address>:<port>/
 
-```text
-http://<pi_ip_address>
-```
-
----
-
-## Step 9 — Export logs
-
-Logs can be exported to:
-
-```text
-/boot/firmware/
-```
-
-This location is readable on Windows.
+Example:
+- http://192.168.1.42/
+- http://192.168.1.42:8080/
 
 ---
 
-## Uninstall (if needed)
+## Step 8 — Export logs to Windows-readable storage
+
+On the Pi desktop, open **Terminal** and run:
 
 ```bash
-cd src
+sudo mkdir -p /boot/firmware/magicbox_logs
+sudo journalctl -u magicbox.service --no-pager > /boot/firmware/magicbox_logs/magicbox_journal.txt
+sync
+```
+
+### Read logs on Windows
+
+1. Shut down the Pi
+2. Remove the SD card
+3. Insert into Windows
+4. Open the **boot** drive
+5. Open `magicbox_logs/magicbox_journal.txt`
+
+---
+
+## Uninstall
+
+```bash
+cd ~/JulesVern_MagicBox/src
 chmod +x uninstall.sh
 sudo ./uninstall.sh
 ```
@@ -212,5 +223,5 @@ sudo ./uninstall.sh
 
 ## Next steps
 
-- Proceed to **WIRING_GUIDE.md**
-- Then read **USAGE_GUIDE.md**
+- WIRING_GUIDE.md
+- USAGE_GUIDE.md
