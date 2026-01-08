@@ -1,28 +1,32 @@
 #!/bin/bash
-set -euo pipefail
+set -Eeuo pipefail
 
 LOG_DIR="/var/log/magicbox"
 LOG_FILE="${LOG_DIR}/installer.log"
 INSTALL_ROOT="/opt/magicbox"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-mkdir -p "${LOG_DIR}"
-
-touch "${LOG_FILE}"
-exec > >(tee -a "${LOG_FILE}") 2>&1
-
 log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') [installer] $*"
 }
 
+mkdir -p "${LOG_DIR}"
+touch "${LOG_FILE}"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
+trap 'log "ERROR at line ${LINENO}: ${BASH_COMMAND}"; exit 1' ERR
+
+if [[ "${EUID}" -ne 0 ]]; then
+  log "Installer must be run as root"
+  exit 1
+fi
+
 log "Starting Magic Box installer"
 
 log "Installing system packages"
+export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y python3 python3-pip
-
-log "Installing Python dependencies"
-pip3 install --no-cache-dir flask gpiozero
+apt-get install -y python3 python3-flask python3-gpiozero
 
 log "Installing application files"
 rm -rf "${INSTALL_ROOT}"

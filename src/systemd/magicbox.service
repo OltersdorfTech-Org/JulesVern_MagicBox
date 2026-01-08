@@ -7,9 +7,12 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/magicbox/src
 Environment=PYTHONPATH=/opt/magicbox/src
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 -m magicbox.main
 Restart=on-failure
 RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=5
 User=root
 Group=root
 

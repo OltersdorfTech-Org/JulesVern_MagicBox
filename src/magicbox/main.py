@@ -100,6 +100,10 @@ def main() -> int:
     if gpio.init_error:
         logger.error("GPIO initialization failed; using fake GPIO")
         status_manager.set_gpio_error(True)
+    elif gpio.using_fake:
+        logger.warning("Using fake GPIO interface (MAGICBOX_FORCE_FAKE_GPIO=1)")
+    else:
+        logger.info("GPIO initialized successfully")
 
     state_store = StateStore(
         message_received=config.DEFAULT_MESSAGE_RECEIVED,
@@ -163,7 +167,8 @@ def main() -> int:
 
     try:
         logger.info("Starting web server on %s:%s", config.WEB_HOST, config.WEB_PORT)
-        status_manager.set_ready()
+        if not gpio.init_error:
+            status_manager.set_ready()
         app.run(host=config.WEB_HOST, port=config.WEB_PORT)
     except Exception as exc:
         logger.exception("Service failed to start: %s", exc)
