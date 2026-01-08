@@ -80,11 +80,13 @@ def create_app(state_store, log_exporter, logger):
     def update_state():
         message_received = flask.request.form.get("message_received") == "on"
         gpio_enabled = flask.request.form.get("gpio_enabled") == "on"
+        logger.info("Web state update requested: message=%s gpio_enabled=%s", message_received, gpio_enabled)
         state_store.update_web_state(message_received, gpio_enabled)
         return flask.redirect(flask.url_for("index"))
 
     @app.route("/export", methods=["POST"])
     def export_logs():
+        logger.info("Web log export requested")
         result = log_exporter.export_logs()
         snapshot = state_store.snapshot()
         return flask.render_template_string(
@@ -97,7 +99,8 @@ def create_app(state_store, log_exporter, logger):
     @app.route("/logs", methods=["GET"])
     def show_logs():
         snapshot = state_store.snapshot()
-        logs = tail_log(config.RUNTIME_LOG_PATH, 200)
+        logger.info("Web log view requested")
+        logs = tail_log(config.RUNTIME_LOG_PATH, 200, logger)
         return flask.render_template_string(
             TEMPLATE,
             state=snapshot,
@@ -112,10 +115,11 @@ def create_app(state_store, log_exporter, logger):
     return app
 
 
-def tail_log(path: str, max_lines: int) -> str:
+def tail_log(path: str, max_lines: int, logger) -> str:
     try:
         with open(path, "r", encoding="utf-8") as handle:
             lines = deque(handle, maxlen=max_lines)
         return "".join(lines)
-    except OSError:
+    except OSError as exc:
+        logger.warning("Log file unavailable: %s", exc)
         return "Log file unavailable."

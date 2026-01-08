@@ -109,29 +109,6 @@ You must now place the **Jules Verne Magic Box project files onto the Pi’s SD 
 
 ---
 
-### Option C — Copy to the SD card’s boot partition (UNIVERSAL FALLBACK)
-
-This works on **any Windows machine**.
-
-1. Insert the SD card into Windows
-2. Open the **boot** partition (FAT32, Windows-readable)
-3. Create a folder named:
-   - `magicbox_install`
-4. Copy the `JulesVern_MagicBox.zip` file into that folder
-5. Safely eject the SD card
-6. Boot the Pi
-
-On the Pi desktop:
-
-1. Open **File Manager**
-2. Navigate to:
-   - `/boot/firmware/magicbox_install/`
-3. Right-click the ZIP file → **Extract**
-4. Move the extracted folder to:
-   - `/home/<username>/`
-
----
-
 ## Step 4 — Find the Pi’s IP address (GUI method)
 
 On the Pi desktop:
@@ -167,7 +144,16 @@ sudo ./installer.sh
 ## Step 6 — Verify the service
 
 ```bash
-sudo systemctl status magicbox.service
+sudo systemctl status magicbox.service --no-pager
+```
+
+Additional service commands:
+
+```bash
+sudo systemctl restart magicbox.service
+sudo journalctl -u magicbox.service -n 200 --no-pager
+ls -la /var/log/magicbox/
+ls -la /boot/firmware/
 ```
 
 Expected:
@@ -181,25 +167,24 @@ Do NOT use a browser on the Pi (low RAM).
 
 From a phone, laptop, or desktop on the same network, open:
 
-- http://<pi_ip_address>/  
+- http://<pi_ip_address>:5000/  
 or  
-- http://<pi_ip_address>:<port>/
+- http://<hostname>.local:5000/
 
 Example:
-- http://192.168.1.42/
-- http://192.168.1.42:8080/
+- http://192.168.1.42:5000/
 
 ---
 
 ## Step 8 — Export logs to Windows-readable storage
 
-On the Pi desktop, open **Terminal** and run:
+In the web UI, click **Export Logs**. The service runs as root and writes logs to:
 
-```bash
-sudo mkdir -p /boot/firmware/magicbox_logs
-sudo journalctl -u magicbox.service --no-pager > /boot/firmware/magicbox_logs/magicbox_journal.txt
-sync
 ```
+/boot/firmware/MAGICBOX_LOGS/
+```
+
+This includes `magicbox.log`, `installer.log`, and `export_manifest.txt`.
 
 ### Read logs on Windows
 
@@ -207,7 +192,7 @@ sync
 2. Remove the SD card
 3. Insert into Windows
 4. Open the **boot** drive
-5. Open `magicbox_logs/magicbox_journal.txt`
+5. Open `MAGICBOX_LOGS/`
 
 ---
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -Eeuo pipefail
 
 LOG_DIR="/var/log/magicbox"
 LOG_FILE="${LOG_DIR}/installer.log"
@@ -10,14 +10,20 @@ if [[ "${1-}" == "--purge-logs" ]]; then
   PURGE_LOGS="true"
 fi
 
-mkdir -p "${LOG_DIR}"
-
-touch "${LOG_FILE}"
-exec > >(tee -a "${LOG_FILE}") 2>&1
-
 log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') [uninstaller] $*"
 }
+
+mkdir -p "${LOG_DIR}"
+touch "${LOG_FILE}"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
+trap 'log "ERROR at line ${LINENO}: ${BASH_COMMAND}"; exit 1' ERR
+
+if [[ "${EUID}" -ne 0 ]]; then
+  log "Uninstaller must be run as root"
+  exit 1
+fi
 
 log "Starting Magic Box uninstall"
 

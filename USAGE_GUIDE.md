@@ -132,7 +132,8 @@ The Status LED is **never disabled**.
 
 #### Export Logs
 - Saves a copy of system logs
-- Logs are written to a location readable by Windows
+- Logs are written to `/boot/firmware/MAGICBOX_LOGS/` by the service (root)
+- Remove the SD card and read `MAGICBOX_LOGS/` on Windows
 
 This is for caretakers, not users.
 

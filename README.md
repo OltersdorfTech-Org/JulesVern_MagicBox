@@ -173,6 +173,23 @@ Long-running props
 
 Storytelling artifacts that must feel intentional
 
+Service checks and logs (commands)
+
+Use these commands on the Pi to manage the service and view logs:
+
+```bash
+sudo systemctl status magicbox.service --no-pager
+sudo systemctl restart magicbox.service
+sudo journalctl -u magicbox.service -n 200 --no-pager
+ls -la /var/log/magicbox/
+ls -la /boot/firmware/
+```
+
+The web UI runs on port 5000 by default:
+
+- `http://<pi_ip_address>:5000/`
+- `http://<hostname>.local:5000/`
+
 Next steps
 
 Proceed to INSTALL_WINDOWS.md to set up your Pi
